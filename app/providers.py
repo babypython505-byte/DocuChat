@@ -41,6 +41,61 @@ class OpenAIProvider:
                 yield delta
 
 
+class GeminiProvider:
+    """Google Gemini via REST (free tier friendly). Embeddings: gemini-embedding-001 at 768 dims."""
+
+    base = "https://generativelanguage.googleapis.com/v1beta"
+
+    def __init__(self, api_key: str, chat_model: str, embed_model: str, dim: int = 768):
+        import httpx
+
+        self.http = httpx.Client(timeout=60, headers={"x-goog-api-key": api_key})
+        self.chat_model = chat_model
+        self.embed_model = embed_model
+        self.dim = dim
+
+    def _embed(self, texts: list[str], task: str) -> np.ndarray:
+        vectors = []
+        for i in range(0, len(texts), 100):  # API batch limit
+            body = {"requests": [
+                {"model": f"models/{self.embed_model}", "content": {"parts": [{"text": t}]},
+                 "taskType": task, "outputDimensionality": self.dim}
+                for t in texts[i : i + 100]
+            ]}
+            r = self.http.post(f"{self.base}/models/{self.embed_model}:batchEmbedContents", json=body)
+            r.raise_for_status()
+            vectors.extend(e["values"] for e in r.json()["embeddings"])
+        return np.asarray(vectors, dtype=np.float32)
+
+    def embed(self, texts: list[str]) -> np.ndarray:
+        return self._embed(texts, "RETRIEVAL_DOCUMENT")
+
+    def embed_query(self, text: str) -> np.ndarray:
+        return self._embed([text], "RETRIEVAL_QUERY")[0]
+
+    def stream_chat(self, system: str, user: str) -> Iterator[str]:
+        import json
+
+        body = {
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "generationConfig": {"temperature": 0.1},
+        }
+        url = f"{self.base}/models/{self.chat_model}:streamGenerateContent?alt=sse"
+        with self.http.stream("POST", url, json=body) as r:
+            if r.status_code >= 400:
+                r.read()
+                raise RuntimeError(f"Gemini error {r.status_code}: {r.text[:300]}")
+            for line in r.iter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = json.loads(line[5:])
+                for cand in data.get("candidates", []):
+                    for part in cand.get("content", {}).get("parts", []):
+                        if part.get("text") and not part.get("thought"):
+                            yield part["text"]
+
+
 class FakeProvider:
     """Hashed bag-of-words embeddings and an extractive 'answer'. No network, fully deterministic."""
 
@@ -63,6 +118,10 @@ class FakeProvider:
 
 
 def make_provider(settings) -> Provider:
+    if settings.provider == "gemini":
+        if not settings.gemini_api_key:
+            raise RuntimeError("LLM_PROVIDER=gemini but GEMINI_API_KEY is not set")
+        return GeminiProvider(settings.gemini_api_key, settings.gemini_chat_model, settings.gemini_embed_model)
     if settings.provider == "openai":
         if not settings.openai_api_key:
             raise RuntimeError("LLM_PROVIDER=openai but OPENAI_API_KEY is not set")
