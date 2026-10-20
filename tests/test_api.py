@@ -44,3 +44,34 @@ def test_chat_without_documents_refuses(client):
     assert events[0]["sources"] == []
     answer = "".join(e["text"] for e in events if e["type"] == "token")
     assert "couldn't find" in answer
+
+
+def test_workspaces_are_isolated(client, handbook_pdf):
+    upload(client, handbook_pdf)
+    from fastapi.testclient import TestClient
+    other = TestClient(client.app)
+    assert other.get("/api/documents").json() == []
+    assert len(client.get("/api/documents").json()) == 1
+
+
+def test_daily_question_limit(handbook_pdf):
+    from fastapi.testclient import TestClient
+    from app.config import Settings
+    from app.main import create_app
+    from app.providers import FakeProvider
+    c = TestClient(create_app(Settings(provider="fake", free_questions_per_day=2), provider=FakeProvider()))
+    for _ in range(2):
+        assert c.post("/api/chat", json={"question": "leave?"}).status_code == 200
+    r = c.post("/api/chat", json={"question": "leave?"})
+    assert r.status_code == 429
+    assert c.get("/api/usage").json()["questions_used"] == 2
+
+
+def test_document_limit(handbook_pdf):
+    from fastapi.testclient import TestClient
+    from app.config import Settings
+    from app.main import create_app
+    from app.providers import FakeProvider
+    c = TestClient(create_app(Settings(provider="fake", free_docs_per_workspace=1), provider=FakeProvider()))
+    assert upload(c, handbook_pdf).status_code == 201
+    assert upload(c, handbook_pdf).status_code == 402
