@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from pathlib import Path
 
@@ -15,6 +16,21 @@ from .ingest import chunk_pdf
 from .providers import make_provider
 from .rag import RagEngine, citations
 from .workspaces import Quota, Workspace, Workspaces
+
+log = logging.getLogger("docuchat")
+
+
+def ai_error(exc: Exception) -> str:
+    """Short, key-free description of an upstream AI error."""
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        try:
+            msg = resp.json().get("error", {}).get("message", "")
+        except Exception:
+            msg = resp.text[:200]
+        return f"upstream {resp.status_code}: {msg[:200]}"
+    return type(exc).__name__
+
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
 COOKIE = "dc_ws"
@@ -77,7 +93,8 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
         try:
             vectors = provider.embed([c.text for c in chunks])
         except Exception as exc:
-            raise HTTPException(503, "The AI service is busy. Please try again in a minute.") from exc
+            log.exception("embedding failed")
+            raise HTTPException(503, f"The AI service is busy. Please try again in a minute. ({ai_error(exc)})") from exc
         ws.store.add(chunks, vectors)
         return {"id": doc_id, "filename": file.filename, "chunks": len(chunks),
                 "pages": max(c.page for c in chunks)}
@@ -99,7 +116,11 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
         if not questions.take([f"ws:{ws.id}", f"ip:{ip}"], limit):
             raise HTTPException(429, f"You've used today's {limit} free questions. Come back tomorrow or upgrade to Pro.")
         engine = RagEngine(provider, ws.store, settings.top_k, settings.min_score)
-        hits = engine.retrieve(req.question, req.doc_ids)
+        try:
+            hits = engine.retrieve(req.question, req.doc_ids)
+        except Exception as exc:
+            log.exception("query embedding failed")
+            raise HTTPException(503, f"The AI service is busy. Please try again in a minute. ({ai_error(exc)})") from exc
 
         def events():
             yield json.dumps({"type": "sources", "sources": citations(hits)}) + "\n"
