@@ -25,6 +25,10 @@
   .bot { background:var(--panel); border:1px solid var(--line); padding:14px 16px; border-radius:14px 14px 14px 4px; }
   .sources { margin-top:10px; display:flex; flex-wrap:wrap; gap:6px; }
   .src { font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:3px 10px; cursor:help; }
+  .plan { margin-top:auto; display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--muted); }
+  .meter { height:6px; background:#0e1420; border:1px solid var(--line); border-radius:99px; overflow:hidden; }
+  #bar { height:100%; width:0; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .3s; }
+  .pro { color:var(--accent); text-decoration:none; font-weight:600; }
   .empty { margin:auto; text-align:center; color:var(--muted); max-width:420px; }
   form { display:flex; gap:10px; padding:16px max(24px, calc(50% - 380px)) 24px; }
   input[type=text] { flex:1; background:var(--panel); border:1px solid var(--line); color:var(--text); border-radius:12px; padding:13px 16px; font-size:15px; outline:none; }
@@ -40,6 +44,11 @@
     <div><h1><span>DocuChat</span></h1><div class="sub">Answers from your PDFs, with page citations.</div></div>
     <label class="drop" id="drop">Drop a PDF here or click to upload<input type="file" id="file" accept="application/pdf" hidden /></label>
     <ul class="docs" id="docs"></ul>
+    <div class="plan" id="plan">
+      <div class="meter"><div id="bar"></div></div>
+      <small id="usage">Free plan</small>
+      <a class="pro" href="mailto:babypython505@gmail.com?subject=DocuChat%20Pro%20waitlist">Get Pro: unlimited questions →</a>
+    </div>
   </aside>
   <main>
     <div id="log"><div class="empty" id="empty">Upload a contract, handbook or report, then ask anything about it. Every answer points to the page it came from.</div></div>
@@ -50,6 +59,11 @@
 const $ = (id) => document.getElementById(id);
 const log = $("log");
 
+async function refreshUsage(u) {
+  u = u || await (await fetch("/api/usage")).json();
+  $("bar").style.width = `${Math.min(100, 100 * u.questions_used / u.questions_limit)}%`;
+  $("usage").textContent = `Free plan · ${u.questions_used}/${u.questions_limit} questions today · ${u.docs_used}/${u.docs_limit} PDFs`;
+}
 async function refreshDocs() {
   const docs = await (await fetch("/api/documents")).json();
   $("docs").innerHTML = docs.map(d => `<li class="doc"><div>${escapeHtml(d.filename)}<small>${d.pages} pages · ${d.chunks} chunks</small></div><button title="Remove" data-id="${d.id}">×</button></li>`).join("");
@@ -65,7 +79,7 @@ async function upload(file) {
   const body = await res.json();
   drop.innerHTML = res.ok ? "Drop another PDF or click to upload" : `⚠ ${escapeHtml(body.detail)}`;
   drop.appendChild($("file"));
-  refreshDocs();
+  refreshDocs(); refreshUsage();
 }
 $("file").addEventListener("change", (e) => e.target.files[0] && upload(e.target.files[0]));
 ["dragover","dragleave","drop"].forEach(ev => $("drop").addEventListener(ev, (e) => {
@@ -87,6 +101,10 @@ $("ask").addEventListener("submit", async (e) => {
   bubble("user", question);
   const bot = bubble("bot"); const text = document.createElement("div"); bot.appendChild(text);
   const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Something went wrong." }));
+    text.textContent = `⚠ ${err.detail}`; $("send").disabled = false; return;
+  }
   const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ""; let sources = [];
   while (true) {
     const { value, done } = await reader.read(); if (done) break;
@@ -97,6 +115,7 @@ $("ask").addEventListener("submit", async (e) => {
       if (ev.type === "sources") sources = ev.sources;
       if (ev.type === "token") text.textContent += ev.text;
       if (ev.type === "error") text.textContent += `\n⚠ ${ev.message}`;
+      if (ev.type === "done" && ev.usage) refreshUsage(ev.usage);
       log.scrollTop = log.scrollHeight;
     }
   }
@@ -107,7 +126,7 @@ $("ask").addEventListener("submit", async (e) => {
   }
   $("send").disabled = false; $("q").focus();
 });
-refreshDocs();
+refreshDocs(); refreshUsage();
 </script>
 </body>
 </html>
