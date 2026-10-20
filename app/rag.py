@@ -35,7 +35,8 @@ class RagEngine:
         self.min_score = min_score
 
     def retrieve(self, question: str, doc_ids: list[str] | None = None) -> list[Hit]:
-        q = self.provider.embed([question])[0]
+        embed_query = getattr(self.provider, "embed_query", None)
+        q = embed_query(question) if embed_query else self.provider.embed([question])[0]
         hits = self.store.search(q, self.top_k, doc_ids)
         return [h for h in hits if h.score >= self.min_score]
 
