@@ -127,8 +127,9 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
             try:
                 for token in engine.stream_answer(req.question, hits):
                     yield json.dumps({"type": "token", "text": token}) + "\n"
-            except Exception:
-                yield json.dumps({"type": "error", "message": "The AI service hiccuped. Please ask again."}) + "\n"
+            except Exception as exc:
+                log.exception("chat failed")
+                yield json.dumps({"type": "error", "message": f"The AI service hiccuped. Please ask again. ({str(exc)[:200]})"}) + "\n"
             yield json.dumps({"type": "done", "usage": usage(ws, ip)}) + "\n"
 
         return StreamingResponse(events(), media_type="application/x-ndjson")
