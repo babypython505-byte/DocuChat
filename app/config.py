@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class Settings:
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY")
     gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
-    gemini_chat_model: str = os.getenv("GEMINI_CHAT_MODEL", "gemini-flash-latest")
+    gemini_chat_model: str = os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash-lite")
     gemini_embed_model: str = os.getenv("GEMINI_EMBED_MODEL", "gemini-embedding-001")
     chat_model: str = os.getenv("CHAT_MODEL", "gpt-4o-mini")
     embed_model: str = os.getenv("EMBED_MODEL", "text-embedding-3-small")
