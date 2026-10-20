@@ -73,6 +73,8 @@ class GeminiProvider:
     def embed_query(self, text: str) -> np.ndarray:
         return self._embed([text], "RETRIEVAL_QUERY")[0]
 
+    FALLBACK_CHAT_MODELS = ("gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash")
+
     def stream_chat(self, system: str, user: str) -> Iterator[str]:
         import json
 
@@ -81,19 +83,28 @@ class GeminiProvider:
             "contents": [{"role": "user", "parts": [{"text": user}]}],
             "generationConfig": {"temperature": 0.1},
         }
-        url = f"{self.base}/models/{self.chat_model}:streamGenerateContent?alt=sse"
-        with self.http.stream("POST", url, json=body) as r:
-            if r.status_code >= 400:
-                r.read()
-                raise RuntimeError(f"Gemini error {r.status_code}: {r.text[:300]}")
-            for line in r.iter_lines():
-                if not line.startswith("data:"):
+        candidates = [self.chat_model] + [m for m in self.FALLBACK_CHAT_MODELS if m != self.chat_model]
+        last_error = ""
+        for model in candidates:
+            url = f"{self.base}/models/{model}:streamGenerateContent?alt=sse"
+            with self.http.stream("POST", url, json=body) as r:
+                if r.status_code in (400, 404) and "not found" in (r.read() or b"").decode(errors="ignore").lower():
+                    last_error = f"{model}: not found"
                     continue
-                data = json.loads(line[5:])
-                for cand in data.get("candidates", []):
-                    for part in cand.get("content", {}).get("parts", []):
-                        if part.get("text") and not part.get("thought"):
-                            yield part["text"]
+                if r.status_code >= 400:
+                    r.read()
+                    raise RuntimeError(f"Gemini error {r.status_code} on {model}: {r.text[:300]}")
+                self.chat_model = model  # remember the model that works
+                for line in r.iter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = json.loads(line[5:])
+                    for cand in data.get("candidates", []):
+                        for part in cand.get("content", {}).get("parts", []):
+                            if part.get("text") and not part.get("thought"):
+                                yield part["text"]
+                return
+        raise RuntimeError(f"No Gemini chat model available ({last_error})")
 
 
 class FakeProvider:
