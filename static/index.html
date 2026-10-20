@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DocuChat · Chat with your PDFs</title>
+<style>
+  :root { --bg:#0b0f17; --panel:#121826; --line:#1f2a3d; --text:#e6ebf5; --muted:#8a96ad; --accent:#6ea8fe; --accent2:#7c5cff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.55 Inter, system-ui, -apple-system, Segoe UI, sans-serif; background:var(--bg); color:var(--text); }
+  .app { display:grid; grid-template-columns: 300px 1fr; height:100vh; }
+  aside { border-right:1px solid var(--line); padding:20px; background:var(--panel); display:flex; flex-direction:column; gap:16px; }
+  h1 { font-size:18px; margin:0; } h1 span { background:linear-gradient(90deg,var(--accent),var(--accent2)); -webkit-background-clip:text; color:transparent; }
+  .sub { color:var(--muted); font-size:13px; margin-top:4px; }
+  .drop { border:1.5px dashed var(--line); border-radius:12px; padding:18px; text-align:center; color:var(--muted); cursor:pointer; transition:.15s; }
+  .drop:hover, .drop.over { border-color:var(--accent); color:var(--text); }
+  .docs { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px; overflow:auto; }
+  .doc { background:#0e1420; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:13px; display:flex; justify-content:space-between; gap:8px; }
+  .doc small { color:var(--muted); display:block; }
+  .doc button { background:none; border:0; color:var(--muted); cursor:pointer; font-size:16px; }
+  main { display:flex; flex-direction:column; height:100vh; }
+  #log { flex:1; overflow:auto; padding:28px max(24px, calc(50% - 380px)); display:flex; flex-direction:column; gap:18px; }
+  .msg { max-width:100%; white-space:pre-wrap; }
+  .user { align-self:flex-end; background:var(--accent2); padding:10px 14px; border-radius:14px 14px 4px 14px; max-width:80%; }
+  .bot { background:var(--panel); border:1px solid var(--line); padding:14px 16px; border-radius:14px 14px 14px 4px; }
+  .sources { margin-top:10px; display:flex; flex-wrap:wrap; gap:6px; }
+  .src { font-size:12px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:3px 10px; cursor:help; }
+  .empty { margin:auto; text-align:center; color:var(--muted); max-width:420px; }
+  form { display:flex; gap:10px; padding:16px max(24px, calc(50% - 380px)) 24px; }
+  input[type=text] { flex:1; background:var(--panel); border:1px solid var(--line); color:var(--text); border-radius:12px; padding:13px 16px; font-size:15px; outline:none; }
+  input[type=text]:focus { border-color:var(--accent); }
+  form button { background:linear-gradient(90deg,var(--accent),var(--accent2)); border:0; color:white; font-weight:600; border-radius:12px; padding:0 20px; cursor:pointer; }
+  form button:disabled { opacity:.5; cursor:default; }
+  @media (max-width: 760px) { .app { grid-template-columns:1fr; } aside { border-right:0; border-bottom:1px solid var(--line); } main { height:auto; min-height:70vh; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div><h1><span>DocuChat</span></h1><div class="sub">Answers from your PDFs, with page citations.</div></div>
+    <label class="drop" id="drop">Drop a PDF here or click to upload<input type="file" id="file" accept="application/pdf" hidden /></label>
+    <ul class="docs" id="docs"></ul>
+  </aside>
+  <main>
+    <div id="log"><div class="empty" id="empty">Upload a contract, handbook or report, then ask anything about it. Every answer points to the page it came from.</div></div>
+    <form id="ask"><input type="text" id="q" placeholder="Ask a question about your documents…" autocomplete="off" /><button id="send">Ask</button></form>
+  </main>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $("log");
+
+async function refreshDocs() {
+  const docs = await (await fetch("/api/documents")).json();
+  $("docs").innerHTML = docs.map(d => `<li class="doc"><div>${escapeHtml(d.filename)}<small>${d.pages} pages · ${d.chunks} chunks</small></div><button title="Remove" data-id="${d.id}">×</button></li>`).join("");
+}
+$("docs").addEventListener("click", async (e) => {
+  if (e.target.dataset.id) { await fetch(`/api/documents/${e.target.dataset.id}`, { method: "DELETE" }); refreshDocs(); }
+});
+
+async function upload(file) {
+  const drop = $("drop"); drop.textContent = `Indexing ${file.name}…`;
+  const fd = new FormData(); fd.append("file", file);
+  const res = await fetch("/api/documents", { method: "POST", body: fd });
+  const body = await res.json();
+  drop.innerHTML = res.ok ? "Drop another PDF or click to upload" : `⚠ ${escapeHtml(body.detail)}`;
+  drop.appendChild($("file"));
+  refreshDocs();
+}
+$("file").addEventListener("change", (e) => e.target.files[0] && upload(e.target.files[0]));
+["dragover","dragleave","drop"].forEach(ev => $("drop").addEventListener(ev, (e) => {
+  e.preventDefault(); $("drop").classList.toggle("over", ev === "dragover");
+  if (ev === "drop" && e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
+}));
+
+function bubble(cls, text = "") {
+  $("empty")?.remove();
+  const el = document.createElement("div"); el.className = `msg ${cls}`; el.textContent = text;
+  log.appendChild(el); log.scrollTop = log.scrollHeight; return el;
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+$("ask").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const question = $("q").value.trim(); if (!question) return;
+  $("q").value = ""; $("send").disabled = true;
+  bubble("user", question);
+  const bot = bubble("bot"); const text = document.createElement("div"); bot.appendChild(text);
+  const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question }) });
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ""; let sources = [];
+  while (true) {
+    const { value, done } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i; while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1); if (!line) continue;
+      const ev = JSON.parse(line);
+      if (ev.type === "sources") sources = ev.sources;
+      if (ev.type === "token") text.textContent += ev.text;
+      if (ev.type === "error") text.textContent += `\n⚠ ${ev.message}`;
+      log.scrollTop = log.scrollHeight;
+    }
+  }
+  if (sources.length) {
+    const s = document.createElement("div"); s.className = "sources";
+    s.innerHTML = sources.map(c => `<span class="src" title="${escapeHtml(c.snippet)}">[${c.n}] ${escapeHtml(c.filename)} · p.${c.page}</span>`).join("");
+    bot.appendChild(s);
+  }
+  $("send").disabled = false; $("q").focus();
+});
+refreshDocs();
+</script>
+</body>
+</html>
