@@ -18,6 +18,8 @@ class Settings:
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
     free_questions_per_day: int = int(os.getenv("FREE_QUESTIONS_PER_DAY", "20"))
     free_docs_per_workspace: int = int(os.getenv("FREE_DOCS_PER_WORKSPACE", "3"))
+    # ~1,200 passages is roughly a 400-page book; caps RAM per document on a 512 MB instance
+    max_chunks_per_doc: int = int(os.getenv("MAX_CHUNKS_PER_DOC", "1200"))
     # "gemini", "openai", or "fake" (offline demos and tests)
     provider: str = os.getenv(
         "LLM_PROVIDER",
