@@ -1,72 +1,174 @@
-# DocuChat: chat with your PDFs, with page citations
+# DocuChat: chat with your PDFs, every answer cited to the page
 
-A production-minded **RAG (retrieval-augmented generation)** app. Upload PDFs (contracts, handbooks, reports), ask questions in plain English, and get streamed answers where **every claim cites the file and page it came from**. If the answer isn't in your documents, it says so instead of guessing.
+Upload lecture notes, a textbook chapter or a stack of research papers, ask anything, and get an answer where **every claim links to the exact page it came from**. Click a citation and the PDF opens beside the chat on that page, with the passage highlighted. If the answer isn't in your documents, DocuChat says so instead of guessing.
 
-Built by **Musendiq Oladimeji**, AI developer and founder of Altix Africa · [altixmanger.com](https://altixmanger.com)
+One click also turns a document into a summary, flashcards, a quiz, a research brief, a side-by-side comparison or a ready-to-paste citation.
+
+**Live:** [docuchat-7jap.onrender.com](https://docuchat-7jap.onrender.com) · **App:** [docuchat-7jap.onrender.com/app](https://docuchat-7jap.onrender.com/app)
+Free, no sign-up. The free Render instance sleeps when idle, so the first load can take about 30 seconds.
+
+Built by **Musendiq Oladimeji** (Altix Africa).
+
+![DocuChat landing page](docs/screenshots/landing.png)
 
 ---
 
+## Who it's for
+
+**Students**
+- Turn a 60-page reading into exam-ready material: TL;DR plus key points, plain-language explanations, flip-card flashcards (Anki CSV export) and multiple-choice quizzes with explanations.
+- Every fact traces back to your course material, so you can check it before you rely on it.
+
+**Researchers**
+- Ask across several papers at once. Answers are drawn only from the retrieved passages.
+- Research briefs pull out the question, methodology, findings, limitations and future work.
+- Compare papers in a side-by-side table of aims, methods, data, results and limitations.
+- Citation export in APA 7, MLA 9 and BibTeX, built from the title page and PDF metadata, editable before you copy.
+
 ## Features
-- **PDF ingestion**: page-aware chunking that breaks on paragraphs and sentences, with overlap
-- **Semantic search**: OpenAI embeddings (`text-embedding-3-small`) and cosine similarity
-- **Grounded answers**: numbered sources in the prompt, strict "answer only from sources" rules, and a relevance floor so the bot refuses off-topic questions
-- **Streaming**: an NDJSON stream sends sources first, then tokens, for a fast-feeling UI
-- **Clean web UI**: drag-and-drop upload, document list, citation chips with snippet previews
-- **Offline demo mode**: `LLM_PROVIDER=fake` runs everything with no API key (deterministic, used in tests)
-- **Tested and shippable**: pytest suite, Dockerfile, GitHub Actions CI
+
+| | |
+|---|---|
+| **Cited answers** | Streamed answers with numbered `[n]` chips that point to a file and page. A relevance floor makes it refuse off-topic questions. Follow-up questions keep the last few turns as context. |
+| **Built-in PDF viewer** | pdf.js renders the cited page beside the chat, highlights the cited passage and shows the snippet. Has page navigation and zoom. |
+| **Study & research tools** | Summarize · Explain simply · Flashcards · Quiz · Research brief · Compare · Cite. Type a topic first to focus a tool. |
+| **History in your browser** | Chats, PDFs, chunks and vectors are kept in IndexedDB, so nothing is stored on the server long-term. Search, rename and delete chats. |
+| **Survives restarts** | If the server restarts and forgets your documents, the browser silently re-uploads its saved index. No re-embedding and no quota used. |
+| **Polish** | Markdown and KaTeX math, drag-and-drop upload with progress, dark/light/auto theme, keyboard shortcuts (`?`), mobile layout, strict CSP. |
+
+<p>
+  <img src="docs/screenshots/chat-citations-viewer.png" alt="Cited answer with the PDF viewer open on the cited page" width="49%" />
+  <img src="docs/screenshots/flashcards.png" alt="Flashcards generated from a lecture" width="49%" />
+</p>
 
 ## Architecture
+
 ```
-PDF ──► pypdf (per page) ──► chunker (size 900, overlap 150) ──► embeddings ──► vector store
-                                                                                   │
-question ──► embed ──► top-k cosine search (+ min score) ──► prompt with [n] sources ──► LLM (streamed)
+Browser (static/app.*)                              FastAPI (app/)
+┌─────────────────────────────┐   upload PDF   ┌──────────────────────────────────────────┐
+│ IndexedDB                   │ ─────────────► │ pypdf per page → chunker (900/150 chars)  │
+│  docs:  PDF blob, chunks,   │ ◄───────────── │ → Gemini embeddings (768-d)               │
+│         float16 vectors     │  chunks+vectors│ → in-memory VectorStore per workspace     │
+│  convs: chats & tool output │                │                                          │
+│                             │  question      │ embed query → top-k cosine (+ min score)  │
+│ pdf.js viewer, KaTeX,       │ ─────────────► │ → prompt with numbered sources            │
+│ marked + DOMPurify          │ ◄── NDJSON ─── │ → Gemini answer, streamed                 │
+│                             │  409 missing?  │                                          │
+│ restore from IndexedDB  ────┼──────────────► │ POST /api/documents/restore (no re-embed) │
+└─────────────────────────────┘                └──────────────────────────────────────────┘
 ```
+
+- **No database.** Each visitor gets an anonymous workspace (HttpOnly cookie) held in server memory, with LRU and idle eviction to keep RAM bounded on a 512 MB instance. Quotas are counted per workspace and per IP.
+- **The browser holds the durable copy.** The upload response includes the chunks and normalised float16 vectors (about 2 KB per chunk), which the browser keeps in IndexedDB with the original PDF.
+- **Restore protocol.** When the server has lost a document (for example after a free-tier restart), any chat or tool call returns `409 {"code": "missing_documents", "missing": [...]}`. The browser posts each missing document to `/api/documents/restore` and retries once. After a few minutes idle, the browser re-syncs before the next question, so the 409 round trip is usually skipped.
+- **Providers.** Gemini (`gemini-2.5-flash-lite` chat, `gemini-embedding-001` at 768 dims) by default. OpenAI and a deterministic offline `fake` provider sit behind the same interface.
+
 | Module | Role |
 |---|---|
-| `app/ingest.py` | PDF text extraction and boundary-aware chunking |
-| `app/store.py` | Thread-safe in-memory vector store (swap for pgvector or Qdrant) |
-| `app/providers.py` | OpenAI provider plus an offline fake provider behind one interface |
-| `app/rag.py` | Retrieval, prompt construction, citations |
-| `app/main.py` | FastAPI endpoints and static UI |
+| `app/main.py` | FastAPI routes, workspaces, quotas, security headers, static pages |
+| `app/ingest.py` | PDF text and metadata extraction, page-aware chunking |
+| `app/store.py` | Thread-safe in-memory vector store |
+| `app/rag.py` | Retrieval, prompt construction, citations, history trimming |
+| `app/tools.py` | Study and research tools: prompts, JSON validation, citation formatting |
+| `app/providers.py` | Gemini, OpenAI and offline fake providers |
+| `app/workspaces.py` | Per-visitor workspaces and daily quotas |
+| `static/` | Landing page (`/`) and the app (`/app`): vanilla JS, no build step |
 
-## Quick start
+<p>
+  <img src="docs/screenshots/compare.png" alt="Side-by-side comparison of two papers" width="49%" />
+  <img src="docs/screenshots/quiz-light.png" alt="Quiz in light mode" width="49%" />
+</p>
+
+## API
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/health` | Liveness: `{status, provider, version}` |
+| `GET` | `/api/config` | Limits, max upload size, tool list, provider |
+| `GET` | `/api/usage` | Questions used/limit and documents used/limit for this workspace |
+| `POST` | `/api/documents` | Upload a PDF (multipart `file`). Returns id, pages, metadata and the `index` (chunks + base64 float16 vectors) for the browser to keep |
+| `GET` | `/api/documents` | Documents in this workspace |
+| `DELETE` | `/api/documents/{id}` | Remove a document |
+| `POST` | `/api/documents/restore` | Re-hydrate a document from the browser's copy: `{id, filename, pages, meta, dim, dtype, chunks, vectors}`. Free, idempotent |
+| `POST` | `/api/chat` | `{question, doc_ids?, history?}`. Streams NDJSON: one `sources` event, `token` events, then `done` (or `error`) |
+| `POST` | `/api/tools/{tool}` | `tool` = `summarize`, `explain`, `flashcards`, `quiz`, `brief`, `compare` or `cite`. Body `{doc_ids, topic?, count?, difficulty?}`. Returns `{tool, title, data, markdown, sources, usage, cost}` |
+
+Error codes: `400` bad input · `402` document limit · `409` documents need restoring · `413` too large · `422` unreadable or scanned PDF · `429` daily limit · `502`/`503` AI service problem (the question is refunded).
+
+Quick check with the offline provider:
+```bash
+LLM_PROVIDER=fake uvicorn app.main:app --port 8000 &
+curl -s localhost:8000/api/health
+curl -s -c jar -b jar -F file=@paper.pdf localhost:8000/api/documents | jq '{id, pages, chunks}'
+curl -s -b jar -H 'content-type: application/json' -d '{"question":"What is the main finding?"}' localhost:8000/api/chat
+```
+
+## Run locally
+
 ```bash
 git clone https://github.com/babypython505-byte/DocuChat.git && cd DocuChat
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env            # add your OPENAI_API_KEY
-export $(cat .env | xargs)
-uvicorn app.main:app --reload   # open http://localhost:8000
+cp .env.example .env              # add a free Gemini key from https://aistudio.google.com/apikey
+set -a && . ./.env && set +a
+uvicorn app.main:app --reload     # http://localhost:8000 (landing) and http://localhost:8000/app
 ```
-No key? Run `LLM_PROVIDER=fake uvicorn app.main:app` to try the full flow offline.
+No key? `LLM_PROVIDER=fake uvicorn app.main:app` runs the whole flow offline. Answers are extracts rather than AI-written.
 
-### Docker
+Docker:
 ```bash
-docker build -t docuchat . && docker run -p 8000:8000 -e OPENAI_API_KEY=sk-... docuchat
+docker build -t docuchat . && docker run -p 8000:8000 -e GEMINI_API_KEY=... docuchat
 ```
 
-## API
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/documents` | Upload a PDF (multipart `file`) and index it |
-| `GET` | `/api/documents` | List indexed documents |
-| `DELETE` | `/api/documents/{id}` | Remove a document |
-| `POST` | `/api/chat` | `{"question": "...", "doc_ids": [optional]}` streams NDJSON events: `sources`, `token`, `done` |
-
-## Tests
+Tests:
 ```bash
 pip install -r requirements-dev.txt && pytest -q
 ```
 
-## Production roadmap
-- Persistent vector DB (pgvector or Qdrant) and per-user workspaces
-- Hybrid search (BM25 plus vectors) with a reranker
-- OCR for scanned PDFs, and DOCX, HTML and Notion sources
-- Auth, rate limiting, and usage metering
-- Evaluation harness (answer faithfulness, retrieval recall)
+## Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GEMINI_API_KEY` | (none) | Enables the Gemini provider (recommended, free tier) |
+| `OPENAI_API_KEY` | (none) | Enables the OpenAI provider if no Gemini key is set |
+| `LLM_PROVIDER` | `gemini` if a Gemini key is set, else `openai` if an OpenAI key is set, else `fake` | Force `gemini`, `openai` or `fake` |
+| `GEMINI_CHAT_MODEL` | `gemini-2.5-flash-lite` | Chat model, with built-in fallbacks |
+| `GEMINI_EMBED_MODEL` | `gemini-embedding-001` | Embedding model (768 dims) |
+| `CHAT_MODEL` / `EMBED_MODEL` | `gpt-4o-mini` / `text-embedding-3-small` | OpenAI models |
+| `FREE_QUESTIONS_PER_DAY` | `20` | Questions and tool runs per workspace and per IP per day |
+| `FREE_DOCS_PER_WORKSPACE` | `3` | PDFs held at once |
+| `MAX_UPLOAD_MB` | `20` | Upload size limit |
+| `MAX_CHUNKS_PER_DOC` | `1200` | About 400 pages; caps RAM per document |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `900` / `150` | Chunking, in characters |
+| `TOP_K` / `MIN_SCORE` | `5` / `0.2` | Retrieval depth and relevance floor |
+
+## Deploy on Render (free tier)
+
+1. Fork the repo and create a **Blueprint** on [render.com](https://render.com) from it. `render.yaml` sets up a free Python web service with `uvicorn app.main:app --host 0.0.0.0 --port $PORT` and a `/api/health` health check.
+2. Set `GEMINI_API_KEY` in the service's environment (it is marked `sync: false`, so it never lives in the repo).
+3. Optional: `.github/workflows/keepalive.yml` pings `/api/health` every 10 minutes to cut down cold starts. Free instances sleep after 15 idle minutes.
+
+Free instances lose memory on every restart or sleep. That is expected: browsers restore their documents through `/api/documents/restore` on their next request.
+
+## Limits (free plan)
+
+- **20 questions a day**. A tool run counts as one question, and Research brief and Cite count one per selected document. Limits are counted per workspace and per IP and reset daily (UTC).
+- **3 PDFs** in the library at a time, up to 20 MB and about 400 pages each.
+- Text-based PDFs only: scanned PDFs need OCR first.
+- History lives in the browser that created it. Clearing site data or switching devices starts fresh.
+
+<img src="docs/screenshots/mobile.png" alt="DocuChat on a phone: cited answer and PDF viewer" width="420" />
+
+## Roadmap
+
+- Accounts with synced history (Postgres + pgvector), and a Pro tier with higher limits
+- OCR for scanned PDFs; DOCX and slide decks
+- Hybrid search (BM25 + vectors) with a reranker
+- Evaluation harness for answer faithfulness and retrieval recall
 
 ## Hire me
-I build custom AI chatbots, agents, and automations for startups and businesses: on your docs, your CRM, or your WhatsApp.
+
+I build AI chatbots, agents and automations for startups and businesses, on your documents, your CRM or your WhatsApp.
 **Email:** babypython505@gmail.com · **Contra:** [contra.com/baby_python_0d8w5tci](https://contra.com/baby_python_0d8w5tci)
 
 MIT License
