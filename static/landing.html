@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DocuChat · Chat with your PDFs. Every answer cited to the page.</title>
+<meta name="description" content="DocuChat turns lecture notes, textbooks and research papers into answers you can trust. Summaries, flashcards, quizzes, research briefs and citations, all linked to the exact page." />
+<meta name="color-scheme" content="dark light" />
+<meta name="theme-color" content="#0a0b10" media="(prefers-color-scheme: dark)" />
+<meta name="theme-color" content="#fbfbfd" media="(prefers-color-scheme: light)" />
+<meta property="og:title" content="DocuChat · Chat with your PDFs" />
+<meta property="og:description" content="Every answer cited to the page. Built for students and researchers." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.1.0/index.min.css" />
+<link rel="stylesheet" href="/static/landing.css" />
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" id="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="/" aria-label="DocuChat home">
+      <img src="/static/favicon.svg" alt="" width="28" height="28" />
+      <span>DocuChat</span>
+    </a>
+    <nav class="nav-links" id="nav-links" aria-label="Primary">
+      <a href="#students">Students</a>
+      <a href="#researchers">Researchers</a>
+      <a href="#how">How it works</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn-ghost hide-sm" href="https://github.com/babypython505-byte/DocuChat" rel="noopener">GitHub</a>
+      <a class="btn btn-primary" href="/app">Open app</a>
+      <button class="menu-btn" id="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="nav-links">
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="grid-bg" aria-hidden="true"></div>
+    <div class="wrap hero-inner">
+      <a class="pill" href="/app"><span class="pill-dot"></span> Free for students · no sign-up <span aria-hidden="true">→</span></a>
+      <h1>Chat with your PDFs.<br /><span class="grad">Every answer cited to the page.</span></h1>
+      <p class="lede">Upload lecture notes, textbooks or research papers. Ask anything, then click any citation to jump straight to the page it came from. Summaries, flashcards, quizzes and literature reviews in one click.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary btn-lg" href="/app">Start free <span aria-hidden="true">→</span></a>
+        <a class="btn btn-ghost btn-lg" href="#how">See how it works</a>
+      </div>
+      <p class="fine">20 free questions a day · 3 PDFs · Nothing to install</p>
+
+      <!-- Animated product mock -->
+      <div class="mock reveal" role="img" aria-label="DocuChat interface: a question about a research paper, an answer with numbered citations, and the cited PDF page opened with the passage highlighted.">
+        <div class="mock-bar"><i></i><i></i><i></i><span>docuchat · app</span></div>
+        <div class="mock-body">
+          <aside class="mock-side">
+            <div class="ms-btn">+ New chat</div>
+            <div class="ms-label">Library</div>
+            <div class="ms-doc active"><b>PDF</b><span>crop-yield-cnn.pdf<small>14 pages</small></span></div>
+            <div class="ms-doc"><b>PDF</b><span>soil-moisture-review.pdf<small>32 pages</small></span></div>
+            <div class="ms-doc"><b>PDF</b><span>BIO201-lecture-7.pdf<small>9 pages</small></span></div>
+            <div class="ms-meter"><span></span></div>
+            <div class="ms-fine">6 / 20 questions today</div>
+          </aside>
+          <div class="mock-chat">
+            <div class="m-user">What sample size did they use, and was the model accurate?</div>
+            <div class="m-bot">
+              <div class="m-line l1">The authors trained on data from <mark>500 farms in Oyo State</mark> <span class="chip c1">1</span></div>
+              <div class="m-line l2">and report <strong>92% accuracy</strong> on the held-out season <span class="chip c2">2</span>.</div>
+              <div class="m-line l3">They note the sample covers a single season only <span class="chip c3">3</span>.</div>
+              <div class="m-tools"><span>Summarize</span><span>Flashcards</span><span>Quiz</span><span>Research brief</span></div>
+            </div>
+            <div class="m-input"><span class="m-caret">Ask a follow-up…</span><b>↵</b></div>
+          </div>
+          <div class="mock-pdf">
+            <div class="mp-head"><span>crop-yield-cnn.pdf</span><em>p. 4</em></div>
+            <div class="mp-page">
+              <div class="mp-h"></div>
+              <div class="mp-l w90"></div><div class="mp-l w80"></div><div class="mp-l w95"></div>
+              <div class="mp-l hl w70"></div><div class="mp-l hl w85"></div>
+              <div class="mp-l w90"></div><div class="mp-l w60"></div>
+              <div class="mp-fig"></div>
+              <div class="mp-l w80"></div><div class="mp-l w90"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul class="works" aria-label="Works with">
+        <li>Lecture notes</li><li>Textbooks</li><li>Journal articles</li><li>Theses</li><li>Lab reports</li><li>Policy papers</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- STUDENTS -->
+  <section class="section" id="students">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">For students</span>
+        <h2>Study faster. Understand more.</h2>
+        <p>Turn a 60-page reading into exam-ready material in minutes, and know every fact traces back to your course material.</p>
+      </div>
+      <div class="cards4">
+        <article class="card reveal">
+          <div class="card-art art-sum" aria-hidden="true"><span></span><span></span><span></span><span class="short"></span></div>
+          <h3>Summaries</h3>
+          <p>A TL;DR plus key points for the whole document, each linked to its page.</p>
+        </article>
+        <article class="card reveal">
+          <div class="card-art art-flip" aria-hidden="true"><div class="flip"><div>What is osmosis?</div><div>Water moving across a membrane…</div></div></div>
+          <h3>Flashcards</h3>
+          <p>Flip-card practice in the browser, and a one-click CSV export for Anki.</p>
+        </article>
+        <article class="card reveal">
+          <div class="card-art art-quiz" aria-hidden="true"><span>A</span><span class="ok">B</span><span>C</span><span>D</span></div>
+          <h3>Quizzes</h3>
+          <p>Interactive multiple-choice questions with explanations and the source to check.</p>
+        </article>
+        <article class="card reveal">
+          <div class="card-art art-eli5" aria-hidden="true"><b>Aa</b><i>→</i><b class="simple">Aa</b></div>
+          <h3>Explain simply</h3>
+          <p>Dense paragraphs rewritten in plain language, with key terms defined.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESEARCHERS -->
+  <section class="section alt" id="researchers">
+    <div class="wrap split">
+      <div class="reveal">
+        <span class="eyebrow">For researchers</span>
+        <h2>A literature review partner that never makes up a source.</h2>
+        <p class="muted">Ask across several papers at once. DocuChat retrieves the exact passages, answers only from them, and tells you when a paper doesn’t say.</p>
+        <ul class="checks">
+          <li><b>Literature review across papers.</b> One question, answers drawn from every selected PDF.</li>
+          <li><b>Compare findings.</b> A side-by-side table of aims, methods, data, results and limitations.</li>
+          <li><b>Methodology extraction.</b> Research briefs with the question, design, sample, findings and future work.</li>
+          <li><b>Citation export.</b> APA, MLA and BibTeX from the title page, editable before you copy.</li>
+        </ul>
+        <a class="btn btn-primary" href="/app">Try it on a paper <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="compare reveal" role="img" aria-label="Example comparison table of two papers by aspect">
+        <div class="cmp-row cmp-head"><span>Aspect</span><span>Obi et al. 2023</span><span>Lin &amp; Park 2024</span></div>
+        <div class="cmp-row"><span>Method</span><span>CNN on satellite imagery <i>1</i></span><span>Random forest on soil sensors <i>4</i></span></div>
+        <div class="cmp-row"><span>Sample</span><span>500 farms, 1 season <i>2</i></span><span>120 plots, 3 seasons <i>5</i></span></div>
+        <div class="cmp-row"><span>Finding</span><span>92% accuracy <i>2</i></span><span>R² = 0.81 <i>6</i></span></div>
+        <div class="cmp-row"><span>Limits</span><span>Single season <i>3</i></span><span class="na">Not stated in the document.</span></div>
+        <div class="bib"><span class="k">@article</span>{obi2023deep,<br />&nbsp;&nbsp;author = {Obi, Ada and Bello, Tunde},<br />&nbsp;&nbsp;year = {2023} …}</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW -->
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">How it works</span>
+        <h2>Three steps. About thirty seconds.</h2>
+      </div>
+      <ol class="steps">
+        <li class="reveal"><span class="step-n">1</span><h3>Drop in your PDFs</h3><p>Drag up to three files at once. DocuChat reads each page and indexes it for search.</p></li>
+        <li class="reveal"><span class="step-n">2</span><h3>Ask or pick a tool</h3><p>Ask in plain English, or tap Summarize, Flashcards, Quiz, Compare or Cite.</p></li>
+        <li class="reveal"><span class="step-n">3</span><h3>Check every claim</h3><p>Click a citation chip and the PDF opens beside the chat on that page, passage highlighted.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- FEATURES -->
+  <section class="section alt" id="features">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Everything included</span>
+        <h2>Built for being right, not just fluent.</h2>
+      </div>
+      <div class="features">
+        <div class="feature reveal"><span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h12v16H4z"/><path d="M8 9h4M8 13h6"/><circle cx="18" cy="17" r="3.5"/><path d="M16.8 17l.9.9 1.6-1.7"/></svg></span><h3>Page-level citations</h3><p>Every claim carries a numbered chip pointing to the file and page.</p></div>
+        <div class="feature reveal"><span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="14" height="18" rx="2"/><path d="M7 8h6M7 12h3"/><circle cx="16" cy="15" r="3.5"/><path d="M18.5 17.5L21 20"/></svg></span><h3>Built-in PDF viewer</h3><p>Opens on the cited page with the passage highlighted.</p></div>
+        <div class="feature reveal"><span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 4H6l6 8-6 8h11"/></svg></span><h3>Math that renders</h3><p>Equations display properly with KaTeX, alongside Markdown and tables.</p></div>
+        <div class="feature reveal"><span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="13" height="15" rx="2"/><path d="M4 7v12a2 2 0 0 0 2 2h10"/></svg></span><h3>Multi-document</h3><p>Ask across your whole library or a hand-picked selection.</p></div>
+        <div class="feature reveal"><span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/></svg></span><h3>Follow-up questions</h3><p>It remembers the last few turns, so “and its limitations?” just works.</p></div>
+        <div class="feature reveal"><span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span><h3>History in your browser</h3><p>Chats and PDFs are saved on your device, not on our servers.</p></div>
+        <div class="feature reveal"><span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/></svg></span><h3>Says “not found”</h3><p>If the document doesn’t cover it, you’re told, rather than handed a guess.</p></div>
+        <div class="feature reveal"><span class="fi"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></span><h3>Keyboard first</h3><p>Shortcuts for new chat, search, upload and send. Press <kbd>?</kbd> in the app.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section class="section" id="pricing">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <span class="eyebrow">Pricing</span>
+        <h2>Free while you study.</h2>
+        <p>No card, no account. Pro is on the way for heavier reading weeks.</p>
+      </div>
+      <div class="plans">
+        <div class="plan reveal">
+          <h3>Free</h3>
+          <div class="price">$0<span>/month</span></div>
+          <ul>
+            <li>20 questions or tool runs a day</li>
+            <li>3 PDFs in your library</li>
+            <li>All study and research tools</li>
+            <li>Citations, PDF viewer, history</li>
+          </ul>
+          <a class="btn btn-ghost btn-block" href="/app">Start free</a>
+        </div>
+        <div class="plan pro reveal">
+          <div class="badge">Coming soon</div>
+          <h3>Pro</h3>
+          <div class="price">$5<span>/month</span></div>
+          <ul>
+            <li>Far more questions every day</li>
+            <li>Bigger library, longer PDFs</li>
+            <li>Priority, faster answers</li>
+            <li>Early access to new tools</li>
+          </ul>
+          <a class="btn btn-primary btn-block" href="mailto:babypython505@gmail.com?subject=DocuChat%20Pro">Join the waitlist</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section alt" id="faq">
+    <div class="wrap narrow">
+      <div class="section-head reveal"><span class="eyebrow">FAQ</span><h2>Questions, answered.</h2></div>
+      <div class="faq">
+        <details class="reveal"><summary>What happens to my documents?</summary><p>Your documents are processed for your session only. The server keeps the extracted text and search index in memory for your workspace and does not write them to a database. Chats and the PDF file itself are saved in your own browser so they’re there when you come back; clear them anytime by deleting the chat or document. Text you ask about is sent to Google’s Gemini API to generate answers.</p></details>
+        <details class="reveal"><summary>Can it make things up?</summary><p>It’s instructed to answer only from the retrieved passages and to say “I couldn’t find that in your documents” otherwise. Every claim is cited so you can check it in one click. AI can still misread a passage, so verify anything important.</p></details>
+        <details class="reveal"><summary>Which PDFs work?</summary><p>Any PDF with selectable text, up to 20 MB. Scanned images without a text layer need OCR first.</p></details>
+        <details class="reveal"><summary>What counts as a question?</summary><p>Each chat message and each tool run (summary, flashcards, quiz, brief, comparison) counts as one. Research briefs and citations count one per document. If the AI fails, the question isn’t counted.</p></details>
+        <details class="reveal"><summary>Does it work on my phone?</summary><p>Yes. The app is responsive, the sidebar and PDF viewer fold away on small screens.</p></details>
+        <details class="reveal"><summary>Is it open source?</summary><p>Yes, the code is on <a href="https://github.com/babypython505-byte/DocuChat" rel="noopener">GitHub</a>.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-band">
+    <div class="wrap cta-inner reveal">
+      <h2>Your next reading, done properly.</h2>
+      <p>Upload a PDF and ask your first question in under a minute.</p>
+      <a class="btn btn-primary btn-lg" href="/app">Open DocuChat <span aria-hidden="true">→</span></a>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap foot-inner">
+    <a class="brand" href="/"><img src="/static/favicon.svg" alt="" width="22" height="22" /><span>DocuChat</span></a>
+    <p>Built by <a href="https://github.com/babypython505-byte/DocuChat" rel="noopener">Musendiq Oladimeji · Altix Africa</a></p>
+    <nav aria-label="Footer"><a href="/app">App</a><a href="#pricing">Pricing</a><a href="#faq">Privacy</a><a href="https://github.com/babypython505-byte/DocuChat" rel="noopener">Source</a></nav>
+  </div>
+</footer>
+<script src="/static/landing.js" defer></script>
+</body>
+</html>
