@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import io
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pypdf import PdfReader
 
@@ -16,13 +16,39 @@ class Chunk:
     text: str
 
 
-def extract_pages(data: bytes) -> list[str]:
+@dataclass
+class ParsedPdf:
+    pages: list[str]
+    meta: dict = field(default_factory=dict)  # title / author / subject / created, when the PDF declares them
+
+
+def _clean_meta(value) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text[:300]
+
+
+def parse_pdf(data: bytes) -> ParsedPdf:
     reader = PdfReader(io.BytesIO(data))
     pages = []
     for page in reader.pages:
         text = page.extract_text() or ""
         pages.append(re.sub(r"[ \t]+", " ", text).strip())
-    return pages
+    meta: dict = {}
+    try:
+        info = reader.metadata or {}
+        for key, name in (("/Title", "title"), ("/Author", "author"), ("/Subject", "subject")):
+            if info.get(key):
+                meta[name] = _clean_meta(info.get(key))
+        created = getattr(reader.metadata, "creation_date", None) if reader.metadata else None
+        if created:
+            meta["created"] = created.date().isoformat()
+    except Exception:  # metadata is best-effort; broken XMP/dates must not block ingestion
+        pass
+    return ParsedPdf(pages=pages, meta=meta)
+
+
+def extract_pages(data: bytes) -> list[str]:
+    return parse_pdf(data).pages
 
 
 def split_text(text: str, size: int, overlap: int) -> list[str]:
@@ -53,9 +79,13 @@ def split_text(text: str, size: int, overlap: int) -> list[str]:
     return chunks
 
 
-def chunk_pdf(doc_id: str, filename: str, data: bytes, size: int, overlap: int) -> list[Chunk]:
+def chunk_pages(doc_id: str, filename: str, pages: list[str], size: int, overlap: int) -> list[Chunk]:
     out: list[Chunk] = []
-    for page_no, page_text in enumerate(extract_pages(data), start=1):
+    for page_no, page_text in enumerate(pages, start=1):
         for piece in split_text(page_text, size, overlap):
             out.append(Chunk(doc_id=doc_id, filename=filename, page=page_no, text=piece))
     return out
+
+
+def chunk_pdf(doc_id: str, filename: str, data: bytes, size: int, overlap: int) -> list[Chunk]:
+    return chunk_pages(doc_id, filename, extract_pages(data), size, overlap)
