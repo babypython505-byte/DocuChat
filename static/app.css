@@ -232,6 +232,12 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line2); border-bottom-widt
 .tool svg { width: 15px; height: 15px; }
 .tool:hover:not(:disabled) { color: var(--text); border-color: var(--a1); background: var(--active); }
 .tool:disabled { opacity: .4; cursor: not-allowed; }
+.tool-link { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--chip-line); background: var(--chip-bg); color: var(--text); font-size: 13px; font-weight: 550; text-decoration: none; transition: border-color .15s, background .15s; }
+.tool-link svg { width: 15px; height: 15px; color: var(--a1); }
+.tool-link:hover { border-color: var(--a1); background: var(--active); }
+.btn-exam { text-decoration: none; color: var(--text); background: transparent; }
+.btn-exam svg { color: var(--a1); }
+.new-tag { margin-left: auto; font-size: 10.5px; font-weight: 700; letter-spacing: .03em; padding: 1px 7px; border-radius: 999px; background: var(--chip-bg); border: 1px solid var(--chip-line); color: var(--a1); }
 .composer { display: flex; align-items: flex-end; gap: 8px; border: 1px solid var(--line2); background: var(--panel); border-radius: 18px; padding: 8px 8px 8px 16px; box-shadow: var(--shadow); transition: border-color .15s; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--a1) 70%, transparent); }
 .composer textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; font-size: 15px; line-height: 1.5; padding: 6px 0; max-height: 220px; min-height: 24px; }

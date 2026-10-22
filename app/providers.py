@@ -180,6 +180,9 @@ class FakeProvider:
         return node
 
     def complete(self, system: str, user: str, json_mode: bool = False, max_tokens: int = 1024) -> str:
+        if "EXAM_MODE:" in system:
+            from .exam import fake_reply  # lazy: exam imports nothing from here
+            return "```json\n" + fake_reply(system, user) + "\n```"
         snippet = self._first_source(user)
         if json_mode or SHAPE_MARKER in system:
             m = re.search(re.escape(SHAPE_MARKER) + r"\s*(\{.*?\})\s*(?:\n\n|\Z)", system, re.S)

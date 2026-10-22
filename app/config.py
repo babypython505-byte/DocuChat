@@ -18,6 +18,8 @@ class Settings:
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "20"))
     free_questions_per_day: int = int(os.getenv("FREE_QUESTIONS_PER_DAY", "20"))
     free_docs_per_workspace: int = int(os.getenv("FREE_DOCS_PER_WORKSPACE", "3"))
+    free_exam_sets_per_day: int = int(os.getenv("FREE_EXAM_SETS_PER_DAY", "5"))
+    free_exam_marks_per_day: int = int(os.getenv("FREE_EXAM_MARKS_PER_DAY", "40"))  # theory-marking requests
     # ~1,200 passages is roughly a 400-page book; caps RAM per document on a 512 MB instance
     max_chunks_per_doc: int = int(os.getenv("MAX_CHUNKS_PER_DOC", "1200"))
     # "gemini", "openai", or "fake" (offline demos and tests)

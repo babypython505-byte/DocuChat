@@ -17,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import Settings, settings as default_settings
+from .exam import (FRIENDLY_FAIL, FRIENDLY_MARK_FAIL, MAX_MARK_ITEMS, ExamInputError, ExamOutputError,
+                   clean_theory_question, generate_exam, mark_mcq, mark_theory)
 from .ingest import Chunk, chunk_pages, parse_pdf
 from .providers import make_provider
 from .rag import RagEngine, citations, trim_history
@@ -59,6 +61,30 @@ class ToolRequest(BaseModel):
     topic: str | None = Field(default=None, max_length=500)
     count: int | None = Field(default=None, ge=1, le=50)
     difficulty: str | None = Field(default=None, max_length=10)
+
+
+class ExamRequest(BaseModel):
+    doc_id: str = Field(min_length=4, max_length=40)
+    page_from: int | None = Field(default=None, ge=1, le=10000)
+    page_to: int | None = Field(default=None, ge=1, le=10000)
+    qtype: Literal["mcq", "theory", "mixed"] = "mcq"
+    count: int = Field(default=10, ge=5, le=50)
+    theory_count: int | None = Field(default=None, ge=1, le=49)
+    difficulty: Literal["easy", "medium", "hard", "mixed"] = "mixed"
+    style: Literal["university", "waec", "jamb", "general"] = "general"
+    topic: str | None = Field(default=None, max_length=300)
+
+
+class MarkItem(BaseModel):
+    id: str = Field(min_length=1, max_length=40)
+    question: dict
+    answer: str | None = Field(default=None, max_length=12000)   # theory
+    choice: int | None = Field(default=None, ge=-1, le=10)        # mcq
+
+
+class MarkRequest(BaseModel):
+    style: Literal["university", "waec", "jamb", "general"] = "general"
+    items: list[MarkItem] = Field(min_length=1, max_length=60)
 
 
 class RestoreChunk(BaseModel):
@@ -118,6 +144,10 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
     provider = provider or make_provider(settings)
     workspaces = Workspaces()
     questions = Quota()
+    exam_sets = Quota()
+    exam_marks = Quota()
+    exam_limit = settings.free_exam_sets_per_day
+    mark_limit = settings.free_exam_marks_per_day
     limit = settings.free_questions_per_day
     doc_limit = settings.free_docs_per_workspace
     provider_dim = getattr(provider, "dim", None)
@@ -141,8 +171,11 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
 
     def usage(ws: Workspace, ip: str) -> dict:
         used = max(questions.used(f"ws:{ws.id}"), questions.used(f"ip:{ip}"))
+        exams = max(exam_sets.used(f"ws:{ws.id}"), exam_sets.used(f"ip:{ip}"))
+        marks = max(exam_marks.used(f"ws:{ws.id}"), exam_marks.used(f"ip:{ip}"))
         return {"questions_used": used, "questions_limit": limit,
-                "docs_used": len(ws.store.documents()), "docs_limit": doc_limit}
+                "docs_used": len(ws.store.documents()), "docs_limit": doc_limit,
+                "exams_used": exams, "exams_limit": exam_limit, "marks_used": marks, "marks_limit": mark_limit}
 
     def quota_keys(ws: Workspace, request: Request) -> list[str]:
         return [f"ws:{ws.id}", f"ip:{client_ip(request)}"]
@@ -177,6 +210,7 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
     @app.get("/api/config")
     def get_config():
         return {"questions_limit": limit, "docs_limit": doc_limit, "max_upload_mb": settings.max_upload_mb,
+                "exams_limit": exam_limit, "marks_limit": mark_limit,
                 "tools": {k: t.title for k, t in TOOLS.items()}, "provider": type(provider).__name__}
 
     @app.post("/api/documents", status_code=201)
@@ -319,6 +353,71 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
         result["cost"] = n
         return result
 
+    @app.post("/api/exam/generate")
+    def exam_generate(req: ExamRequest, request: Request, ws: Workspace = Depends(workspace)):
+        """Build an exam set from a page range of one document. Counts as one exam set (separate daily limit)."""
+        if not DOC_ID_RE.match(req.doc_id):
+            raise HTTPException(422, "Invalid document id")
+        require_docs(ws, [req.doc_id])
+        keys = quota_keys(ws, request)
+        if not exam_sets.take(keys, exam_limit):
+            raise HTTPException(429, f"You've made today's {exam_limit} free exam sets. Come back tomorrow, "
+                                     "or retry your wrong questions from your results (that's free).")
+        try:
+            exam = generate_exam(provider, ws.store, req.doc_id, req.model_dump())
+        except ExamInputError as exc:
+            exam_sets.give_back(keys)
+            raise HTTPException(400, str(exc)) from exc
+        except ExamOutputError as exc:
+            exam_sets.give_back(keys)
+            log.warning("exam generation returned invalid JSON twice: %s", exc)
+            raise HTTPException(502, FRIENDLY_FAIL) from exc
+        except Exception as exc:
+            exam_sets.give_back(keys)
+            log.exception("exam generation failed")
+            raise HTTPException(503, f"{FRIENDLY_FAIL} ({ai_error(exc)})") from exc
+        exam["usage"] = usage(ws, client_ip(request))
+        return exam
+
+    @app.post("/api/exam/mark")
+    def exam_mark(req: MarkRequest, request: Request, ws: Workspace = Depends(workspace)):
+        """Mark answers. MCQs are checked instantly with no AI call; theory answers are marked by the AI against the
+        question's marking points (one marking request per call, up to MAX_MARK_ITEMS answers)."""
+        results: dict[str, dict] = {}
+        theory = []
+        for it in req.items:
+            qtype = it.question.get("type")
+            if qtype == "mcq":
+                results[it.id] = mark_mcq(it.question, it.choice)
+            elif qtype == "theory":
+                try:
+                    theory.append({"id": it.id, "question": clean_theory_question(it.question), "answer": it.answer or ""})
+                except ExamInputError as exc:
+                    raise HTTPException(422, f"{it.id}: {exc}") from exc
+            else:
+                raise HTTPException(422, f"{it.id}: unknown question type")
+        if len(theory) > MAX_MARK_ITEMS:
+            raise HTTPException(413, f"Mark at most {MAX_MARK_ITEMS} written answers at a time.")
+        needs_ai = any(len(t["answer"].strip()) >= 2 for t in theory)
+        keys = quota_keys(ws, request)
+        if needs_ai and not exam_marks.take(keys, mark_limit):
+            raise HTTPException(429, f"You've used today's {mark_limit} free marking requests. Compare with the model "
+                                     "answers for now, and come back tomorrow for AI marking.")
+        if theory:
+            try:
+                results.update(mark_theory(provider, req.style, theory))
+            except ExamOutputError as exc:
+                if needs_ai:
+                    exam_marks.give_back(keys)
+                log.warning("exam marking returned invalid JSON twice: %s", exc)
+                raise HTTPException(502, FRIENDLY_MARK_FAIL) from exc
+            except Exception as exc:
+                if needs_ai:
+                    exam_marks.give_back(keys)
+                log.exception("exam marking failed")
+                raise HTTPException(503, f"{FRIENDLY_MARK_FAIL} ({ai_error(exc)})") from exc
+        return {"results": results, "usage": usage(ws, client_ip(request))}
+
     @app.get("/")
     def landing():
         return FileResponse(STATIC / "landing.html")
@@ -326,6 +425,10 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
     @app.get("/app")
     def app_page():
         return FileResponse(STATIC / "app.html")
+
+    @app.get("/exam")
+    def exam_page():
+        return FileResponse(STATIC / "exam.html")
 
     @app.get("/favicon.ico")
     def favicon():

@@ -4,7 +4,9 @@ Upload lecture notes, a textbook chapter or a stack of research papers, ask anyt
 
 One click also turns a document into a summary, flashcards, a quiz, a research brief, a side-by-side comparison or a ready-to-paste citation.
 
-**Live:** [docuchat-7jap.onrender.com](https://docuchat-7jap.onrender.com) · **App:** [docuchat-7jap.onrender.com/app](https://docuchat-7jap.onrender.com/app)
+**Exam Prep** turns your own notes into a practice exam: objective or theory, university or WAEC/JAMB, timed or untimed, marked instantly with the page to revise.
+
+**Live:** [docuchat-7jap.onrender.com](https://docuchat-7jap.onrender.com) · **App:** [docuchat-7jap.onrender.com/app](https://docuchat-7jap.onrender.com/app) · **Exam Prep:** [docuchat-7jap.onrender.com/exam](https://docuchat-7jap.onrender.com/exam)
 Free, no sign-up. The free Render instance sleeps when idle, so the first load can take about 30 seconds.
 
 Built by **Musendiq Oladimeji** (Altix Africa).
@@ -18,6 +20,7 @@ Built by **Musendiq Oladimeji** (Altix Africa).
 **Students**
 - Turn a 60-page reading into exam-ready material: TL;DR plus key points, plain-language explanations, flip-card flashcards (Anki CSV export) and multiple-choice quizzes with explanations.
 - Every fact traces back to your course material, so you can check it before you rely on it.
+- **Exam Prep** (`/exam`): practice exam questions from your own notes so you walk in confident. Pick a PDF and page range, objective (MCQ), theory or mixed, 5 to 50 questions, a style (University, WAEC, JAMB/UTME, General) and a difficulty, timed or untimed.
 
 **Researchers**
 - Ask across several papers at once. Answers are drawn only from the retrieved passages.
@@ -34,6 +37,7 @@ Built by **Musendiq Oladimeji** (Altix Africa).
 | **Study & research tools** | Summarize · Explain simply · Flashcards · Quiz · Research brief · Compare · Cite. Type a topic first to focus a tool. |
 | **History in your browser** | Chats, PDFs, chunks and vectors are kept in IndexedDB, so nothing is stored on the server long-term. Search, rename and delete chats. |
 | **Survives restarts** | If the server restarts and forgets your documents, the browser silently re-uploads its saved index. No re-embedding and no quota used. |
+| **Exam Prep** | Exam-style question sets from a page range of one PDF. Timer that auto-submits, question navigator, one-at-a-time or all-on-one-page, flag for review. Instant MCQ feedback with an explanation and "see page X"; theory answers marked by the AI point by point against a marking scheme, with partial credit and a model answer. Results show score, time, breakdown by topic and page, weak areas, "Retry wrong questions" and "Generate new set on weak areas". Progress history and the in-progress attempt are kept in the browser. |
 | **Polish** | Markdown and KaTeX math, drag-and-drop upload with progress, dark/light/auto theme, keyboard shortcuts (`?`), mobile layout, strict CSP. |
 
 <p>
@@ -70,9 +74,10 @@ Browser (static/app.*)                              FastAPI (app/)
 | `app/store.py` | Thread-safe in-memory vector store |
 | `app/rag.py` | Retrieval, prompt construction, citations, history trimming |
 | `app/tools.py` | Study and research tools: prompts, JSON validation, citation formatting |
+| `app/exam.py` | Exam Prep: page-range context, batched question generation with strict validation, MCQ and theory marking |
 | `app/providers.py` | Gemini, OpenAI and offline fake providers |
 | `app/workspaces.py` | Per-visitor workspaces and daily quotas |
-| `static/` | Landing page (`/`) and the app (`/app`): vanilla JS, no build step |
+| `static/` | Landing page (`/`), the app (`/app`) and Exam Prep (`/exam`): vanilla JS, no build step |
 
 <p>
   <img src="docs/screenshots/compare.png" alt="Side-by-side comparison of two papers" width="49%" />
@@ -92,6 +97,8 @@ Browser (static/app.*)                              FastAPI (app/)
 | `POST` | `/api/documents/restore` | Re-hydrate a document from the browser's copy: `{id, filename, pages, meta, dim, dtype, chunks, vectors}`. Free, idempotent |
 | `POST` | `/api/chat` | `{question, doc_ids?, history?}`. Streams NDJSON: one `sources` event, `token` events, then `done` (or `error`) |
 | `POST` | `/api/tools/{tool}` | `tool` = `summarize`, `explain`, `flashcards`, `quiz`, `brief`, `compare` or `cite`. Body `{doc_ids, topic?, count?, difficulty?}`. Returns `{tool, title, data, markdown, sources, usage, cost}` |
+| `POST` | `/api/exam/generate` | `{doc_id, page_from?, page_to?, qtype: mcq\|theory\|mixed, count: 5-50, theory_count?, difficulty, style: university\|waec\|jamb\|general, topic?}`. Returns `{doc_id, filename, settings, questions, total_marks, usage}`. MCQs carry `options`, `answer`, `explanation`, `pages`; theory questions carry `parts`, `marks`, `marking_points`, `model_answer`, `pages`. One exam set from the daily exam limit |
+| `POST` | `/api/exam/mark` | `{style, items: [{id, question, choice? \| answer?}]}`. MCQs are checked with no AI call; up to 10 theory answers are marked per request against their marking points. Returns `{results, usage}` |
 
 Error codes: `400` bad input · `402` document limit · `409` documents need restoring · `413` too large · `422` unreadable or scanned PDF · `429` daily limit · `502`/`503` AI service problem (the question is refunded).
 
@@ -137,6 +144,8 @@ pip install -r requirements-dev.txt && pytest -q
 | `CHAT_MODEL` / `EMBED_MODEL` | `gpt-4o-mini` / `text-embedding-3-small` | OpenAI models |
 | `FREE_QUESTIONS_PER_DAY` | `20` | Questions and tool runs per workspace and per IP per day |
 | `FREE_DOCS_PER_WORKSPACE` | `3` | PDFs held at once |
+| `FREE_EXAM_SETS_PER_DAY` | `5` | Exam sets generated per workspace and per IP per day |
+| `FREE_EXAM_MARKS_PER_DAY` | `40` | Theory-marking requests per day (MCQ marking is free) |
 | `MAX_UPLOAD_MB` | `20` | Upload size limit |
 | `MAX_CHUNKS_PER_DOC` | `1200` | About 400 pages; caps RAM per document |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `900` / `150` | Chunking, in characters |
@@ -153,6 +162,7 @@ Free instances lose memory on every restart or sleep. That is expected: browsers
 ## Limits (free plan)
 
 - **20 questions a day**. A tool run counts as one question, and Research brief and Cite count one per selected document. Limits are counted per workspace and per IP and reset daily (UTC).
+- **5 exam sets a day** and **40 theory-marking requests a day** in Exam Prep (separate from questions). Retrying wrong questions reuses the set, so it costs nothing.
 - **3 PDFs** in the library at a time, up to 20 MB and about 400 pages each.
 - Text-based PDFs only: scanned PDFs need OCR first.
 - History lives in the browser that created it. Clearing site data or switching devices starts fresh.

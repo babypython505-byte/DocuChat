@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Exam Prep · DocuChat</title>
+<meta name="description" content="Practice exam questions from your own notes: objective or theory, university or WAEC/JAMB. Marked instantly, with the page to revise." />
+<meta name="color-scheme" content="dark light" />
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.1.0/index.min.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+<link rel="stylesheet" href="/static/app.css" />
+<link rel="stylesheet" href="/static/exam.css" />
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" defer></script>
+<script src="/static/exam.js" type="module"></script>
+</head>
+<body class="exam-page">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></symbol>
+    <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19a2 2 0 0 1 2-2h13v4H6a2 2 0 0 1-2-2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></symbol>
+    <symbol id="i-grad" viewBox="0 0 24 24"><path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5"/><path d="M22 9v6"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-single" viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  </defs>
+</svg>
+
+<header class="ex-top">
+  <a class="brand" href="/" title="DocuChat home"><img src="/static/favicon.svg" alt="" width="24" height="24" /><span>DocuChat</span></a>
+  <span class="ex-crumb"><svg><use href="#i-grad"/></svg>Exam Prep</span>
+  <div class="ex-top-actions">
+    <a class="btn btn-ghost btn-sm" href="/app"><svg><use href="#i-chat"/></svg><span class="hide-sm">Chat with PDFs</span><span class="show-sm">Chat</span></a>
+    <button class="icon-btn" id="theme-btn" title="Theme" aria-label="Toggle theme"><svg><use href="#i-auto"/></svg></button>
+  </div>
+</header>
+
+<main class="ex-main" id="main">
+  <!-- SETUP -->
+  <section id="view-setup" class="ex-view" aria-labelledby="setup-title">
+    <div class="ex-hero">
+      <h1 id="setup-title">Exam Prep</h1>
+      <p>Practice exam questions from your own notes: objective or theory, university or WAEC/JAMB. Every question shows the page to revise.</p>
+    </div>
+
+    <div class="resume" id="resume" hidden></div>
+
+    <form class="ex-card setup" id="setup-form" novalidate>
+      <div class="field">
+        <span class="label">1 · Your notes</span>
+        <div class="doc-row">
+          <select id="doc-select" aria-label="Document"></select>
+          <label class="btn btn-ghost upload-btn" tabindex="0" id="upload-label"><svg><use href="#i-upload"/></svg><span>Upload PDF</span>
+            <input type="file" id="file-input" accept="application/pdf,.pdf" hidden />
+          </label>
+        </div>
+        <p class="hint" id="doc-hint">Text-based PDFs up to 20 MB. Your PDFs stay saved in this browser.</p>
+      </div>
+
+      <div class="field">
+        <span class="label">2 · Pages</span>
+        <div class="pages-row">
+          <label class="check"><input type="checkbox" id="all-pages" checked /> All pages</label>
+          <label class="num">From <input type="number" id="page-from" min="1" value="1" inputmode="numeric" disabled /></label>
+          <label class="num">to <input type="number" id="page-to" min="1" value="1" inputmode="numeric" disabled /></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label">3 · Question type</span>
+        <div class="seg" role="radiogroup" aria-label="Question type" data-name="qtype">
+          <label><input type="radio" name="qtype" value="mcq" checked /><span>Objective (MCQ)</span></label>
+          <label><input type="radio" name="qtype" value="theory" /><span>Theory</span></label>
+          <label><input type="radio" name="qtype" value="mixed" /><span>Mixed</span></label>
+        </div>
+      </div>
+
+      <div class="field two">
+        <div>
+          <span class="label">Number of questions <b id="count-out">10</b></span>
+          <input type="range" id="count" min="5" max="50" step="1" value="10" aria-label="Number of questions" />
+        </div>
+        <div id="theory-count-wrap" hidden>
+          <span class="label">Of which theory</span>
+          <input type="number" id="theory-count" min="1" max="49" value="3" inputmode="numeric" aria-label="Number of theory questions" />
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label">4 · Exam style</span>
+        <div class="seg wrap4" role="radiogroup" aria-label="Exam style">
+          <label><input type="radio" name="style" value="university" /><span>University</span></label>
+          <label><input type="radio" name="style" value="waec" /><span>WAEC</span></label>
+          <label><input type="radio" name="style" value="jamb" /><span>JAMB / UTME</span></label>
+          <label><input type="radio" name="style" value="general" checked /><span>General</span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label">5 · Difficulty</span>
+        <div class="seg wrap4" role="radiogroup" aria-label="Difficulty">
+          <label><input type="radio" name="difficulty" value="easy" /><span>Easy</span></label>
+          <label><input type="radio" name="difficulty" value="medium" /><span>Medium</span></label>
+          <label><input type="radio" name="difficulty" value="hard" /><span>Hard</span></label>
+          <label><input type="radio" name="difficulty" value="mixed" checked /><span>Mixed</span></label>
+        </div>
+      </div>
+
+      <div class="field two">
+        <div>
+          <span class="label">6 · Timing</span>
+          <div class="seg" role="radiogroup" aria-label="Timing">
+            <label><input type="radio" name="timing" value="untimed" checked /><span>Untimed</span></label>
+            <label><input type="radio" name="timing" value="timed" /><span>Timed</span></label>
+          </div>
+        </div>
+        <div id="minutes-wrap" hidden>
+          <span class="label">Minutes</span>
+          <input type="number" id="minutes" min="1" max="300" value="10" inputmode="numeric" aria-label="Time limit in minutes" />
+          <span class="hint" id="minutes-hint"></span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="check"><input type="checkbox" id="instant" checked /> Show answers as I go <span class="hint inline">(turn off for exam conditions: everything is marked when you submit)</span></label>
+      </div>
+
+      <div class="field">
+        <label class="label" for="topic">Focus topic <span class="opt-tag">optional</span></label>
+        <input type="text" id="topic" maxlength="300" placeholder="e.g. Osmosis, cell division, Nigerian constitution" autocomplete="off" />
+      </div>
+
+      <div class="setup-foot">
+        <button class="btn btn-primary btn-lg" type="submit" id="generate"><svg><use href="#i-sparkle"/></svg>Generate exam</button>
+        <span class="hint" id="exam-usage"></span>
+      </div>
+    </form>
+
+    <section class="ex-card history" id="history" aria-labelledby="hist-title">
+      <div class="hist-head"><h2 id="hist-title">Your progress</h2><button class="act" id="clear-history" hidden><svg><use href="#i-trash"/></svg><span>Clear</span></button></div>
+      <div id="history-body"></div>
+    </section>
+  </section>
+
+  <!-- GENERATING -->
+  <section id="view-loading" class="ex-view" hidden>
+    <div class="ex-card loading">
+      <span class="thinking" aria-hidden="true"><i></i><i></i><i></i></span>
+      <h2 id="loading-title">Writing your exam…</h2>
+      <p class="muted" id="loading-text">Reading the pages you chose and setting questions. This takes 10–60 seconds.</p>
+    </div>
+  </section>
+
+  <!-- PRACTICE -->
+  <section id="view-practice" class="ex-view" hidden>
+    <div class="pbar" id="pbar">
+      <div class="pbar-info"><b id="p-title">Exam</b><span id="p-sub" class="muted"></span></div>
+      <div class="timer" id="timer" aria-live="off"><svg><use href="#i-clock"/></svg><span id="timer-text">0:00</span></div>
+      <div class="pbar-acts">
+        <button class="icon-btn" id="layout-btn" title="Show all questions on one page" aria-label="Toggle layout"><svg><use href="#i-list"/></svg></button>
+        <button class="btn btn-primary btn-sm" id="submit-btn">Submit</button>
+      </div>
+    </div>
+    <nav class="navigator" id="navigator" aria-label="Question navigator"></nav>
+    <div id="questions"></div>
+    <div class="pnav" id="pnav">
+      <button class="btn" id="prev-q"><svg><use href="#i-left"/></svg>Previous</button>
+      <span class="muted" id="pnav-label"></span>
+      <button class="btn" id="next-q">Next<svg><use href="#i-right"/></svg></button>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <section id="view-results" class="ex-view" hidden>
+    <div id="results"></div>
+  </section>
+</main>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<dialog id="dlg-page" class="dlg dlg-wide">
+  <h2 id="page-title">Page</h2>
+  <div class="page-text" id="page-text"></div>
+  <form method="dialog" class="dlg-actions"><a class="btn btn-ghost" href="/app">Open in chat</a><button class="btn btn-primary">Close</button></form>
+</dialog>
+
+<dialog id="dlg-confirm" class="dlg">
+  <form method="dialog">
+    <h2 id="confirm-title">Submit exam?</h2>
+    <p id="confirm-text" class="muted"></p>
+    <div class="dlg-actions">
+      <button class="btn btn-ghost" value="cancel" formnovalidate>Keep going</button>
+      <button class="btn btn-primary" id="confirm-ok" value="ok">Submit</button>
+    </div>
+  </form>
+</dialog>
+</body>
+</html>
