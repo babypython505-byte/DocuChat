@@ -182,13 +182,13 @@ def test_generation_upstream_error_is_friendly_and_refunded():
 
 
 def test_daily_exam_set_limit():
-    c = make_client(free_exam_sets_per_day=2)
+    c = make_client(free_exam_sets_per_day=2, guest_exam_sets_per_day=2)
     doc = upload(c)
     body = {"doc_id": doc["id"], "count": 5}
     assert c.post("/api/exam/generate", json=body).status_code == 200
     assert c.post("/api/exam/generate", json=body).status_code == 200
     r = c.post("/api/exam/generate", json=body)
-    assert r.status_code == 429 and "exam sets" in r.json()["detail"]
+    assert r.status_code == 429 and "exam" in r.json()["detail"]
 
 
 def test_generate_validation_and_missing_docs():
@@ -232,7 +232,7 @@ def test_mark_endpoint_mcq_needs_no_ai_and_no_quota():
     class NoAI(FakeProvider):
         def complete(self, *a, **k):
             raise AssertionError("MCQ marking must not call the AI")
-    c = make_client(NoAI(), free_exam_marks_per_day=0)
+    c = make_client(NoAI(), free_exam_marks_per_day=0, guest_exam_marks_per_day=0)
     q = normalize_questions(MCQ_JSON, "mcq", 1, 4, {})[0]
     r = c.post("/api/exam/mark", json={"items": [{"id": "q1", "question": q, "choice": q["answer"]}]})
     assert r.status_code == 200
@@ -276,7 +276,7 @@ def test_mark_theory_invalid_json_twice_is_friendly_and_refunded():
 
 
 def test_mark_rejects_bad_questions_and_enforces_limit():
-    c = make_client(free_exam_marks_per_day=1)
+    c = make_client(free_exam_marks_per_day=1, guest_exam_marks_per_day=1)
     assert c.post("/api/exam/mark", json={"items": [{"id": "q1", "question": {"type": "theory", "question": "x"}, "answer": "y"}]}).status_code == 422
     assert c.post("/api/exam/mark", json={"items": [{"id": "q1", "question": {"type": "essay"}}]}).status_code == 422
     body = {"items": [{"id": "q1", "question": theory_q(), "answer": "glucose from carbon dioxide and water using light"}]}

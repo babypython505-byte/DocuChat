@@ -176,10 +176,13 @@ async function api(path, { method = "GET", body, retry = true } = {}) {
   return res.json();
 }
 async function ensureSynced() { if (Date.now() - state.lastOk > SYNC_STALE_MS) await syncDocs({ silent: true }); }
+const SIGNUP_LINK = () => ({ href: `/login?tab=signup&next=${encodeURIComponent(location.pathname + location.search)}`, text: "Create free account" });
+const isGuest = () => state.usage && state.usage.signed_in === false;
 function handleError(err, context = "") {
   const s = err?.status;
   const msg = err?.message || "Something went wrong.";
-  if (s === 429) toast(msg, "error", { ms: 9000, link: { href: "mailto:babypython505@gmail.com?subject=DocuChat%20Pro", text: "Join Pro waitlist" } });
+  if ((s === 429 || s === 402) && isGuest()) toast(msg, "warn", { link: SIGNUP_LINK(), ms: 12000 });
+  else if (s === 429) toast(msg, "error", { ms: 9000, link: { href: "mailto:babypython505@gmail.com?subject=DocuChat%20Pro", text: "Join Pro waitlist" } });
   else if (s === 502 || s === 503) toast(msg.replace(/\s*\(.*\)$/, ""), "error", { ms: 8000 });
   else if ([400, 402, 413, 422].includes(s)) toast(`${context ? context + ": " : ""}${msg}`, "warn", { ms: 7000 });
   else toast(msg, "error", { ms: 7000 });
@@ -217,7 +220,7 @@ async function restoreDoc(id) {
     return true;
   } catch (e) {
     if (e.status === 422) { if (d) d.status = "stale"; toast(`${rec.filename} needs to be re-uploaded (the AI model changed).`, "warn", { ms: 8000 }); }
-    else if (e.status === 402) toast(e.message, "warn");
+    else if (e.status === 402) toast(e.message, "warn", isGuest() ? { link: SIGNUP_LINK(), ms: 12000 } : {});
     else throw e;
     return false;
   }
@@ -858,7 +861,7 @@ function renderResults(a) {
     s.weak.length
       ? el("ul", { class: "weak-list" }, s.weak.slice(0, 5).map((w) => el("li", {},
           el("span", { class: "weak-name" }, w.name), el("span", { class: "weak-pct" }, `${w.pct}%`),
-          w.pages.length ? el("span", { class: "muted" }, " · revise ", w.pages.map((p, i) => [i ? ", " : "", el("button", { class: "linkish", onclick: () => openPage(a.docId, p) }, `p. ${p}`)])) : null)))
+          w.pages.length ? el("span", { class: "muted" }, " · revise ", w.pages.flatMap((p, i) => [i ? ", " : "", el("button", { class: "linkish", onclick: () => openPage(a.docId, p) }, `p. ${p}`)])) : null)))
       : el("p", { class: "muted" }, "No weak topics this time: every topic scored 60% or more."));
   const topicEntries = Object.entries(s.topics).sort((x, y) => pct(x[1].score, x[1].max) - pct(y[1].score, y[1].max));
   const pageEntries = Object.entries(s.pages).sort((x, y) => +x[0] - +y[0]);

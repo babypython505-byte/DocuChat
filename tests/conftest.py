@@ -1,3 +1,11 @@
+import os
+
+# Existing tests exercise the plan limits through guest clients; give guests the account limits by default here.
+# tests/test_guest_limits.py covers the real (smaller) guest allowance explicitly.
+for _k, _v in {"GUEST_QUESTIONS_PER_DAY": "20", "GUEST_DOCS_PER_WORKSPACE": "3",
+               "GUEST_EXAM_SETS_PER_DAY": "5", "GUEST_EXAM_MARKS_PER_DAY": "40"}.items():
+    os.environ.setdefault(_k, _v)
+
 import io
 
 import pytest

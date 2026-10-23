@@ -116,7 +116,7 @@ def test_restore_validation(client, leave_pdf):
 
 
 def test_restore_enforces_document_limit(leave_pdf):
-    app = create_app(Settings(provider="fake", free_docs_per_workspace=1), provider=FakeProvider())
+    app = create_app(Settings(provider="fake", free_docs_per_workspace=1, guest_docs_per_workspace=1), provider=FakeProvider())
     a = TestClient(app)
     doc = upload(a, leave_pdf)
     b = TestClient(app)
@@ -207,12 +207,12 @@ def test_tools_count_against_quota_and_refund_on_failure(paper_pdf):
     class Broken(FakeProvider):
         def complete(self, system, user, json_mode=False, max_tokens=1024):
             return "sorry, no json here"
-    c = TestClient(create_app(Settings(provider="fake", free_questions_per_day=2), provider=Broken()))
+    c = TestClient(create_app(Settings(provider="fake", free_questions_per_day=2, guest_questions_per_day=2), provider=Broken()))
     doc = upload(c, paper_pdf)
     r = c.post("/api/tools/summarize", json={"doc_ids": [doc["id"]]})
     assert r.status_code == 502
     assert c.get("/api/usage").json()["questions_used"] == 0  # refunded
-    ok = TestClient(create_app(Settings(provider="fake", free_questions_per_day=2), provider=FakeProvider()))
+    ok = TestClient(create_app(Settings(provider="fake", free_questions_per_day=2, guest_questions_per_day=2), provider=FakeProvider()))
     d = upload(ok, paper_pdf)
     for _ in range(2):
         assert ok.post("/api/tools/flashcards", json={"doc_ids": [d["id"]]}).status_code == 200

@@ -175,6 +175,10 @@ def create_app(settings: Settings = default_settings, provider=None, verifier: T
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
+        new_ws = getattr(request.state, "new_ws_cookie", None)
+        if new_ws:
+            response.set_cookie(COOKIE, new_ws, max_age=30 * 86400, httponly=True, samesite="lax",
+                                secure=request.url.scheme == "https")
         for k, v in headers.items():
             response.headers.setdefault(k, v)
         if request.url.path.startswith("/api/"):
@@ -194,26 +198,52 @@ def create_app(settings: Settings = default_settings, provider=None, verifier: T
             return workspaces.get_or_create_user(user.id)
         ws = workspaces.get_or_create(request.cookies.get(COOKIE))
         if request.cookies.get(COOKIE) != ws.id:
-            response.set_cookie(COOKIE, ws.id, max_age=30 * 86400, httponly=True, samesite="lax",
-                                secure=request.url.scheme == "https")
+            # Set in middleware so it also lands on StreamingResponses (chat), which ignore the injected response.
+            request.state.new_ws_cookie = ws.id
         return ws
 
     def usage(ws: Workspace, ip: str) -> dict:
-        used = max(questions.used(f"ws:{ws.id}"), questions.used(f"ip:{ip}"))
-        exams = max(exam_sets.used(f"ws:{ws.id}"), exam_sets.used(f"ip:{ip}"))
-        marks = max(exam_marks.used(f"ws:{ws.id}"), exam_marks.used(f"ip:{ip}"))
-        return {"questions_used": used, "questions_limit": limit,
-                "docs_used": len(ws.store.documents()), "docs_limit": doc_limit,
-                "exams_used": exams, "exams_limit": exam_limit, "marks_used": marks, "marks_limit": mark_limit,
-                "signed_in": ws.id.startswith("user:")}
+        key = f"ws:{ws.id}"
+        L = USER_LIMITS if ws.id.startswith("user:") else GUEST_LIMITS
+        return {"questions_used": questions.used(key), "questions_limit": L["questions"],
+                "docs_used": len(ws.store.documents()), "docs_limit": L["docs"],
+                "exams_used": exam_sets.used(key), "exams_limit": L["exams"],
+                "marks_used": exam_marks.used(key), "marks_limit": L["marks"],
+                "signed_in": ws.id.startswith("user:"),
+                "account_limits": {"questions": limit, "docs": doc_limit, "exams": exam_limit}}
+
+    GUEST_LIMITS = {"questions": settings.guest_questions_per_day, "docs": settings.guest_docs_per_workspace,
+                    "exams": settings.guest_exam_sets_per_day, "marks": settings.guest_exam_marks_per_day}
+    USER_LIMITS = {"questions": limit, "docs": doc_limit, "exams": exam_limit, "marks": mark_limit}
+    SIGNUP_PITCH = (f"Create a free account to keep going: {limit} questions, {doc_limit} PDFs and "
+                    f"{exam_limit} exams a day, with your scores saved.")
+
+    def is_user(ws: Workspace) -> bool:
+        return ws.id.startswith("user:")
+
+    def lim(ws: Workspace, kind: str) -> int:
+        return (USER_LIMITS if is_user(ws) else GUEST_LIMITS)[kind]
 
     def quota_keys(ws: Workspace, request: Request) -> list[str]:
-        return [f"ws:{ws.id}", f"ip:{client_ip(request)}"]
+        # Accounts are counted per account only (a whole campus can share one IP). Guests are counted per browser
+        # and, loosely, per IP so clearing cookies doesn't reset the guest allowance forever.
+        if is_user(ws):
+            return [f"ws:{ws.id}"]
+        return [f"ws:{ws.id}", f"gip:{client_ip(request)}"]
+
+    def caps(ws: Workspace, request: Request, kind: str) -> dict[str, int]:
+        n = lim(ws, kind)
+        return {k: (n * settings.guest_ip_multiplier if k.startswith("gip:") else n) for k in quota_keys(ws, request)}
+
+    def limit_msg(ws: Workspace, user_msg: str, guest_what: str) -> str:
+        return user_msg if is_user(ws) else f"That's the guest limit ({guest_what}). {SIGNUP_PITCH}"
 
     def charge(ws: Workspace, request: Request, n: int = 1) -> list[str]:
         keys = quota_keys(ws, request)
-        if not questions.take(keys, limit, n):
-            raise HTTPException(429, f"You've used today's {limit} free questions. Come back tomorrow or join the Pro waitlist.")
+        if not questions.take(keys, caps(ws, request, "questions"), n):
+            q = lim(ws, "questions")
+            raise HTTPException(429, limit_msg(ws, f"You've used today's {q} free questions. Come back tomorrow or join the Pro waitlist.",
+                                               f"{q} questions a day"))
         return keys
 
     def require_docs(ws: Workspace, doc_ids: list[str] | None) -> None:
@@ -246,6 +276,7 @@ def create_app(settings: Settings = default_settings, provider=None, verifier: T
     def get_config():
         return {"questions_limit": limit, "docs_limit": doc_limit, "max_upload_mb": settings.max_upload_mb,
                 "exams_limit": exam_limit, "marks_limit": mark_limit,
+                "guest_limits": GUEST_LIMITS,
                 "auth": {"enabled": verifier.enabled, "supabase_url": verifier.url if verifier.enabled else None,
                          "supabase_anon_key": verifier.anon_key if verifier.enabled else None},
                 "tools": {k: t.title for k, t in TOOLS.items()}, "provider": type(provider).__name__}
@@ -254,8 +285,10 @@ def create_app(settings: Settings = default_settings, provider=None, verifier: T
     async def upload(request: Request, file: UploadFile = File(...), ws: Workspace = Depends(workspace)):
         if not (file.filename or "").lower().endswith(".pdf"):
             raise HTTPException(400, "Only PDF files are supported")
-        if len(ws.store.documents()) >= doc_limit:
-            raise HTTPException(402, f"The free plan holds {doc_limit} documents at a time. Remove one to add another.")
+        if len(ws.store.documents()) >= lim(ws, "docs"):
+            d = lim(ws, "docs")
+            raise HTTPException(402, limit_msg(ws, f"The free plan holds {d} documents at a time. Remove one to add another.",
+                                               f"{d} PDF at a time" if d == 1 else f"{d} PDFs at a time"))
         data = await file.read()
         if len(data) > settings.max_upload_mb * 1024 * 1024:
             raise HTTPException(413, f"File is larger than {settings.max_upload_mb} MB")
@@ -291,8 +324,9 @@ def create_app(settings: Settings = default_settings, provider=None, verifier: T
             raise HTTPException(422, "Invalid document id")
         if ws.store.has(req.id):
             return {"id": req.id, "restored": False, "usage": usage(ws, client_ip(request))}
-        if len(ws.store.documents()) >= doc_limit:
-            raise HTTPException(402, f"The free plan holds {doc_limit} documents at a time.")
+        if len(ws.store.documents()) >= lim(ws, "docs"):
+            raise HTTPException(402, limit_msg(ws, f"The free plan holds {lim(ws, 'docs')} documents at a time.",
+                                               f"{lim(ws, 'docs')} PDF at a time"))
         n = len(req.chunks)
         if n > settings.max_chunks_per_doc:
             raise HTTPException(413, "Too many chunks for one document")
@@ -397,9 +431,11 @@ def create_app(settings: Settings = default_settings, provider=None, verifier: T
             raise HTTPException(422, "Invalid document id")
         require_docs(ws, [req.doc_id])
         keys = quota_keys(ws, request)
-        if not exam_sets.take(keys, exam_limit):
-            raise HTTPException(429, f"You've made today's {exam_limit} free exam sets. Come back tomorrow, "
-                                     "or retry your wrong questions from your results (that's free).")
+        if not exam_sets.take(keys, caps(ws, request, "exams")):
+            e = lim(ws, "exams")
+            raise HTTPException(429, limit_msg(ws, f"You've made today's {e} free exam sets. Come back tomorrow, "
+                                                   "or retry your wrong questions from your results (that's free).",
+                                               f"{e} exam a day" if e == 1 else f"{e} exams a day"))
         try:
             exam = generate_exam(provider, ws.store, req.doc_id, req.model_dump())
         except ExamInputError as exc:
@@ -437,9 +473,11 @@ def create_app(settings: Settings = default_settings, provider=None, verifier: T
             raise HTTPException(413, f"Mark at most {MAX_MARK_ITEMS} written answers at a time.")
         needs_ai = any(len(t["answer"].strip()) >= 2 for t in theory)
         keys = quota_keys(ws, request)
-        if needs_ai and not exam_marks.take(keys, mark_limit):
-            raise HTTPException(429, f"You've used today's {mark_limit} free marking requests. Compare with the model "
-                                     "answers for now, and come back tomorrow for AI marking.")
+        if needs_ai and not exam_marks.take(keys, caps(ws, request, "marks")):
+            m = lim(ws, "marks")
+            raise HTTPException(429, limit_msg(ws, f"You've used today's {m} free marking requests. Compare with the model "
+                                                   "answers for now, and come back tomorrow for AI marking.",
+                                               f"{m} AI markings a day"))
         if theory:
             try:
                 results.update(mark_theory(provider, req.style, theory))

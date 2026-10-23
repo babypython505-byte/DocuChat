@@ -161,7 +161,8 @@ Free instances lose memory on every restart or sleep. That is expected: browsers
 
 ## Limits (free plan)
 
-- **20 questions a day**. A tool run counts as one question, and Research brief and Cite count one per selected document. Limits are counted per workspace and per IP and reset daily (UTC).
+- **Guests** (no account): 5 questions, 1 PDF, 1 exam set and 3 AI markings a day, then a prompt to create a free account.
+- **Free account: 20 questions a day**. A tool run counts as one question, and Research brief and Cite count one per selected document. Account limits are counted per account; guest limits per browser and loosely per IP (10x, since campus networks share IPs). All reset daily (UTC).
 - **5 exam sets a day** and **40 theory-marking requests a day** in Exam Prep (separate from questions). Retrying wrong questions reuses the set, so it costs nothing.
 - **3 PDFs** in the library at a time, up to 20 MB and about 400 pages each.
 - Text-based PDFs only: scanned PDFs need OCR first.

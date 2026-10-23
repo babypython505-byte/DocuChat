@@ -59,7 +59,7 @@ def test_daily_question_limit(handbook_pdf):
     from app.config import Settings
     from app.main import create_app
     from app.providers import FakeProvider
-    c = TestClient(create_app(Settings(provider="fake", free_questions_per_day=2), provider=FakeProvider()))
+    c = TestClient(create_app(Settings(provider="fake", free_questions_per_day=2, guest_questions_per_day=2), provider=FakeProvider()))
     for _ in range(2):
         assert c.post("/api/chat", json={"question": "leave?"}).status_code == 200
     r = c.post("/api/chat", json={"question": "leave?"})
@@ -72,6 +72,6 @@ def test_document_limit(handbook_pdf):
     from app.config import Settings
     from app.main import create_app
     from app.providers import FakeProvider
-    c = TestClient(create_app(Settings(provider="fake", free_docs_per_workspace=1), provider=FakeProvider()))
+    c = TestClient(create_app(Settings(provider="fake", free_docs_per_workspace=1, guest_docs_per_workspace=1), provider=FakeProvider()))
     assert upload(c, handbook_pdf).status_code == 201
     assert upload(c, handbook_pdf).status_code == 402

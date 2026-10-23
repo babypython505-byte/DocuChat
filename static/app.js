@@ -168,11 +168,14 @@ async function ensureSynced() {
 }
 const apiJson = async (path, opts) => (await api(path, opts)).json();
 
+const SIGNUP_LINK = () => ({ href: `/login?tab=signup&next=${encodeURIComponent(location.pathname + location.search)}`, text: "Create free account" });
+const isGuest = () => state.usage && state.usage.signed_in === false;
 function handleError(err, context = "") {
   if (err?.name === "AbortError") return;
   const s = err?.status;
   const msg = err?.message || "Something went wrong.";
-  if (s === 429) toast(`${msg}`, "error", { link: { href: "mailto:babypython505@gmail.com?subject=DocuChat%20Pro", text: "Join Pro waitlist" }, ms: 9000 });
+  if ((s === 429 || s === 402) && isGuest()) toast(msg, "warn", { link: SIGNUP_LINK(), ms: 12000 });
+  else if (s === 429) toast(`${msg}`, "error", { link: { href: "mailto:babypython505@gmail.com?subject=DocuChat%20Pro", text: "Join Pro waitlist" }, ms: 9000 });
   else if (s === 402) toast(msg, "warn", { ms: 7000 });
   else if (s === 503 || s === 502) toast(msg.replace(/\s*\(.*\)$/, ""), "error", { ms: 7000 });
   else if (s === 413 || s === 422 || s === 400) toast(`${context ? context + ": " : ""}${msg}`, "warn", { ms: 7000 });
@@ -953,7 +956,7 @@ async function restoreDoc(id) {
   } catch (e) {
     if (d) d.status = e.status === 422 ? "stale" : "ready";
     if (e.status === 422) { state.selected.delete(id); toast(`${rec.filename} needs to be re-uploaded (the AI model changed).`, "warn", { ms: 8000 }); }
-    else if (e.status === 402) toast(e.message, "warn");
+    else if (e.status === 402) toast(e.message, "warn", isGuest() ? { link: SIGNUP_LINK(), ms: 12000 } : {});
     else throw e;
     return false;
   } finally { renderDocs(); }

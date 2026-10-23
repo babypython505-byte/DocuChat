@@ -44,11 +44,12 @@ class Quota:
             self._roll()
             return self._counts.get(key, 0)
 
-    def take(self, keys: list[str], limit: int, n: int = 1) -> bool:
-        """Consume n uses for every key if all stay within the limit."""
+    def take(self, keys: list[str], limit: "int | dict[str, int]", n: int = 1) -> bool:
+        """Consume n uses for every key if all stay within the limit (one limit for all keys, or one per key)."""
         with self._lock:
             self._roll()
-            if any(self._counts.get(k, 0) + n > limit for k in keys):
+            cap = (lambda k: limit[k]) if isinstance(limit, dict) else (lambda k: limit)
+            if any(self._counts.get(k, 0) + n > cap(k) for k in keys):
                 return False
             for k in keys:
                 self._counts[k] = self._counts.get(k, 0) + n
