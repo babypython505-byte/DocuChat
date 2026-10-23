@@ -72,12 +72,27 @@ class Workspaces:
         workspace under the same id, so the browser's cookie stays valid and it can restore its documents."""
         with self._lock:
             self._evict()
-            ws = self._items.get(ws_id or "")
+            ws = self._items.get(ws_id) if ws_id and _ID_RE.match(ws_id) else None
             if ws is None:
                 new_id = ws_id if ws_id and _ID_RE.match(ws_id) else secrets.token_urlsafe(16)
                 ws = Workspace(id=new_id)
                 self._items[ws.id] = ws
             self._items.move_to_end(ws.id)
+            ws.last_seen = time.time()
+            while len(self._items) > MAX_WORKSPACES:
+                self._items.popitem(last=False)
+            return ws
+
+    def get_or_create_user(self, user_id: str) -> Workspace:
+        """A signed-in user's workspace, keyed by their Supabase user id so it follows them across browsers.
+        The "user:" prefix can't match a visitor cookie (_ID_RE has no colon), so a guest can never claim it."""
+        key = f"user:{user_id}"
+        with self._lock:
+            self._evict()
+            ws = self._items.get(key)
+            if ws is None:
+                ws = self._items[key] = Workspace(id=key)
+            self._items.move_to_end(key)
             ws.last_seen = time.time()
             while len(self._items) > MAX_WORKSPACES:
                 self._items.popitem(last=False)

@@ -12,10 +12,11 @@ from typing import Literal
 
 import numpy as np
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .auth import TokenVerifier, User, bearer
 from .config import Settings, settings as default_settings
 from .exam import (FRIENDLY_FAIL, FRIENDLY_MARK_FAIL, MAX_MARK_ITEMS, ExamInputError, ExamOutputError,
                    clean_theory_question, generate_exam, mark_mcq, mark_theory)
@@ -73,6 +74,8 @@ class ExamRequest(BaseModel):
     difficulty: Literal["easy", "medium", "hard", "mixed"] = "mixed"
     style: Literal["university", "waec", "jamb", "general"] = "general"
     topic: str | None = Field(default=None, max_length=300)
+    weak_topics: list[str] = Field(default_factory=list, max_length=6)     # adaptive "weak areas" sets
+    missed: list[str] = Field(default_factory=list, max_length=12)         # stems the student got wrong
 
 
 class MarkItem(BaseModel):
@@ -103,6 +106,16 @@ class RestoreRequest(BaseModel):
     vectors: str = Field(min_length=4)  # base64 of row-major (n, dim) little-endian floats
 
 
+def friendly_ai(exc: Exception, fallback: str) -> str:
+    """Say what actually went wrong upstream in words a student understands (the set is never charged)."""
+    text = str(exc)
+    if "429" in text or "RESOURCE_EXHAUSTED" in text:
+        return "The AI is getting a lot of requests right now. Wait about a minute and try again; this set wasn't counted."
+    if "Timeout" in text or "timed out" in text.lower():
+        return "The AI took too long on this one. Try fewer questions or a smaller page range; this set wasn't counted."
+    return fallback + " This set wasn't counted."
+
+
 def client_ip(request: Request) -> str:
     fwd = request.headers.get("x-forwarded-for")
     return fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "unknown")
@@ -125,23 +138,29 @@ def clean_meta(meta: dict) -> dict:
     return out
 
 
+def csp(supabase_url: str) -> str:
+    sb = f" {supabase_url} {supabase_url.replace('https://', 'wss://', 1)}" if supabase_url.startswith("https://") else ""
+    return (
+        "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; "
+        "img-src 'self' data: blob:; worker-src 'self' blob: https://cdn.jsdelivr.net; "
+        f"connect-src 'self' https://cdn.jsdelivr.net{sb}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    )
+
+
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-Frame-Options": "DENY",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-    "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; "
-        "img-src 'self' data: blob:; worker-src 'self' blob: https://cdn.jsdelivr.net; "
-        "connect-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
-    ),
 }
 
 
-def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
-    app = FastAPI(title="DocuChat", version="2.0.0")
+def create_app(settings: Settings = default_settings, provider=None, verifier: TokenVerifier | None = None) -> FastAPI:
+    app = FastAPI(title="DocuChat", version="2.1.0")
     provider = provider or make_provider(settings)
+    verifier = verifier or TokenVerifier(settings.supabase_url, settings.supabase_anon_key, settings.auth_cache_seconds)
+    headers = {**SECURITY_HEADERS, "Content-Security-Policy": csp(verifier.url if verifier.enabled else "")}
     workspaces = Workspaces()
     questions = Quota()
     exam_sets = Quota()
@@ -156,13 +175,23 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
         response = await call_next(request)
-        for k, v in SECURITY_HEADERS.items():
+        for k, v in headers.items():
             response.headers.setdefault(k, v)
         if request.url.path.startswith("/api/"):
             response.headers.setdefault("Cache-Control", "no-store")
         return response
 
+    def current_user(request: Request) -> User | None:
+        if not hasattr(request.state, "user"):
+            request.state.user = verifier.verify(bearer(request.headers.get("authorization")))
+        return request.state.user
+
     def workspace(request: Request, response: Response) -> Workspace:
+        """Signed-in users (valid Supabase bearer token) get a workspace keyed by their user id, so their quota and
+        PDFs follow them; everyone else keeps the anonymous cookie workspace. A bad/expired token falls back to guest."""
+        user = current_user(request)
+        if user:
+            return workspaces.get_or_create_user(user.id)
         ws = workspaces.get_or_create(request.cookies.get(COOKIE))
         if request.cookies.get(COOKIE) != ws.id:
             response.set_cookie(COOKIE, ws.id, max_age=30 * 86400, httponly=True, samesite="lax",
@@ -175,7 +204,8 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
         marks = max(exam_marks.used(f"ws:{ws.id}"), exam_marks.used(f"ip:{ip}"))
         return {"questions_used": used, "questions_limit": limit,
                 "docs_used": len(ws.store.documents()), "docs_limit": doc_limit,
-                "exams_used": exams, "exams_limit": exam_limit, "marks_used": marks, "marks_limit": mark_limit}
+                "exams_used": exams, "exams_limit": exam_limit, "marks_used": marks, "marks_limit": mark_limit,
+                "signed_in": ws.id.startswith("user:")}
 
     def quota_keys(ws: Workspace, request: Request) -> list[str]:
         return [f"ws:{ws.id}", f"ip:{client_ip(request)}"]
@@ -207,10 +237,17 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
     def get_usage(request: Request, ws: Workspace = Depends(workspace)):
         return usage(ws, client_ip(request))
 
+    @app.get("/api/me")
+    def me(request: Request):
+        user = current_user(request)
+        return {"signed_in": bool(user), "id": user.id if user else None, "email": user.email if user else None}
+
     @app.get("/api/config")
     def get_config():
         return {"questions_limit": limit, "docs_limit": doc_limit, "max_upload_mb": settings.max_upload_mb,
                 "exams_limit": exam_limit, "marks_limit": mark_limit,
+                "auth": {"enabled": verifier.enabled, "supabase_url": verifier.url if verifier.enabled else None,
+                         "supabase_anon_key": verifier.anon_key if verifier.enabled else None},
                 "tools": {k: t.title for k, t in TOOLS.items()}, "provider": type(provider).__name__}
 
     @app.post("/api/documents", status_code=201)
@@ -375,7 +412,7 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
         except Exception as exc:
             exam_sets.give_back(keys)
             log.exception("exam generation failed")
-            raise HTTPException(503, f"{FRIENDLY_FAIL} ({ai_error(exc)})") from exc
+            raise HTTPException(503, f"{friendly_ai(exc, FRIENDLY_FAIL)} ({ai_error(exc)})") from exc
         exam["usage"] = usage(ws, client_ip(request))
         return exam
 
@@ -427,8 +464,21 @@ def create_app(settings: Settings = default_settings, provider=None) -> FastAPI:
         return FileResponse(STATIC / "app.html")
 
     @app.get("/exam")
-    def exam_page():
-        return FileResponse(STATIC / "exam.html")
+    def exam_page(request: Request):
+        """Exam Prep now lives inside the app (one layout, one PDF library); keep old links working."""
+        qs = "&resume=1" if request.query_params.get("resume") == "1" else ""
+        return RedirectResponse(f"/app?mode=exam{qs}", status_code=307)
+
+    @app.get("/auth-config.js")
+    def auth_config():
+        """Public Supabase settings for the browser (project URL + publishable/anon key; never a secret key)."""
+        cfg = {"url": verifier.url, "key": verifier.anon_key} if verifier.enabled else {}
+        return Response(f"window.DC_AUTH = {json.dumps(cfg)};\n", media_type="text/javascript",
+                        headers={"Cache-Control": "public, max-age=300"})
+
+    @app.get("/login")
+    def login_page():
+        return FileResponse(STATIC / "login.html")
 
     @app.get("/favicon.ico")
     def favicon():

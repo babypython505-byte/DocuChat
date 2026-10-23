@@ -1,8 +1,9 @@
-// DocuChat Exam Prep. Vanilla ES module, shares the PDF library (IndexedDB "docuchat") with the chat app.
+// DocuChat Exam Prep. Vanilla ES module that runs inside the app layout (/app?mode=exam): app.js imports it on first
+// use and calls initExam(); it shares the PDF library (IndexedDB "docuchat") and library selection with chat.
 // Flow: setup -> generate (POST /api/exam/generate) -> practice (timer, navigator, instant or end-of-exam marking)
 // -> results (score, time, topic/page breakdown, weak areas, retry). MCQs are marked in the browser (the answer key
 // comes with the set); theory answers go to POST /api/exam/mark. Progress history and the in-progress attempt live in
-// localStorage so a refresh or a closed tab never loses work.
+// localStorage so a refresh or a closed tab never loses work; signed-in users also sync results to their account.
 
 const PDFJS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build";
 const LS_CURRENT = "dc-exam-current";
@@ -238,12 +239,12 @@ function uploadFile(file) {
   if (!(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) return toast("Only PDF files can be added.", "warn");
   if (file.size > maxMb * 1024 * 1024) return toast(`${file.name} is over ${maxMb} MB.`, "warn");
   if (state.docs.filter((d) => d.status !== "stale").length >= limit) {
-    return toast(`The free plan holds ${limit} PDFs. Remove one in Chat with PDFs to add another.`, "warn", { ms: 7000 });
+    return toast(`The free plan holds ${limit} PDFs. Remove one from the Library in the sidebar to add another.`, "warn", { ms: 7000 });
   }
   state.uploading = true;
   const label = $("#upload-label span");
   label.textContent = "Uploading… 0%";
-  const done = () => { state.uploading = false; label.textContent = "Upload PDF"; $("#file-input").value = ""; };
+  const done = () => { state.uploading = false; label.textContent = "Upload PDF"; $("#ex-file-input").value = ""; };
   const xhr = new XMLHttpRequest();
   const fd = new FormData(); fd.append("file", file, file.name);
   xhr.open("POST", "/api/documents");
@@ -266,6 +267,7 @@ function uploadFile(file) {
     setUsage(body.usage); state.lastOk = Date.now();
     done();
     renderDocSelect(rec.id);
+    document.dispatchEvent(new CustomEvent("dc:library-changed", { detail: { id: rec.id } }));
     toast(`${rec.filename} is ready · ${plural(rec.pages, "page")}`, "ok");
   };
   xhr.send(fd);
@@ -291,6 +293,7 @@ async function pdfLib() {
 async function openPage(docId, page) {
   const dlg = $("#dlg-page");
   const box = $("#page-text");
+  state.pageOpen = { docId, page };
   const name = docById(docId)?.filename || state.attempt?.filename || "your notes";
   $("#page-title").textContent = `Page ${page} · ${name}`;
   box.replaceChildren(el("span", { class: "thinking" }, el("i"), el("i"), el("i")));
@@ -321,7 +324,7 @@ async function openPage(docId, page) {
 }
 function pageLinks(pages, docId) {
   if (!pages?.length) return null;
-  return el("span", { class: "see-pages" }, "See ", pages.map((p, i) => [i ? ", " : "", el("button", { class: "linkish", type: "button", onclick: () => openPage(docId, p) }, `page ${p}`)]));
+  return el("span", { class: "see-pages" }, "See ", pages.flatMap((p, i) => [i ? ", " : "", el("button", { class: "linkish", type: "button", onclick: () => openPage(docId, p) }, `page ${p}`)]));
 }
 
 /* ---------------- setup form ---------------- */
@@ -388,7 +391,7 @@ function renderDocSelect(selectId) {
   const stale = state.docs.filter((d) => d.status === "stale").length;
   $("#doc-hint").textContent = stale
     ? `${plural(stale, "PDF")} in your library need${stale === 1 ? "s" : ""} re-uploading before they can be used.`
-    : "Text-based PDFs up to 20 MB. Your PDFs stay saved in this browser and are shared with Chat with PDFs.";
+    : "Text-based PDFs up to 20 MB. Your PDFs stay saved in this browser and are shared with Chat.";
   syncForm();
 }
 function renderUsage() {
@@ -409,11 +412,13 @@ function applyPrefs() {
 }
 
 /* ---------------- views ---------------- */
+const scrollTop = () => { const p = $("#exam-pane"); if (p) p.scrollTo({ top: 0 }); };
+const examVisible = () => !$("#exam-pane").hidden;
 function show(view) {
   state.view = view;
   for (const v of ["setup", "loading", "practice", "results"]) $(`#view-${v}`).hidden = v !== view;
-  document.body.dataset.view = view;
-  window.scrollTo({ top: 0 });
+  $("#exam-pane").dataset.view = view;
+  scrollTop();
   if (view === "setup") { renderResume(); renderHistory(); }
 }
 
@@ -430,12 +435,16 @@ async function generate(overrides = {}, { origin = "new" } = {}) {
   $("#loading-title").textContent = origin === "weak" ? "Writing questions on your weak areas…" : "Writing your exam…";
   $("#loading-text").textContent = `Reading ${f.page_from ? `pages ${f.page_from}–${f.page_to}` : "your notes"} and setting ${plural(f.count, "question")}. This takes 10–60 seconds.`;
   show("loading");
+  const stopProgress = loadingProgress(f, origin);
   try {
     await ensureSynced();
     const exam = await api("/api/exam/generate", { method: "POST", body: {
       doc_id: f.doc_id, page_from: f.page_from, page_to: f.page_to, qtype: f.qtype, count: f.count,
-      theory_count: f.theory_count, difficulty: f.difficulty, style: f.style, topic: f.topic || null } });
+      theory_count: f.theory_count, difficulty: f.difficulty, style: f.style, topic: f.topic || null,
+      weak_topics: f.weak_topics || [], missed: f.missed || [] } });
+    stopProgress(true);
     setUsage(exam.usage);
+    if (!Array.isArray(exam.questions) || !exam.questions.length) throw new ApiError(502, "The AI didn't return any questions. Please try again; this set wasn't counted.");
     startAttempt({
       docId: exam.doc_id, filename: exam.filename || doc.filename, questions: exam.questions, settings: exam.settings,
       timing: f.timing, minutes: f.timing === "timed" ? f.minutes : null, instant: f.instant, origin, topic: f.topic,
@@ -443,13 +452,40 @@ async function generate(overrides = {}, { origin = "new" } = {}) {
     const got = exam.questions.length;
     if (got < f.count) toast(`The AI could only set ${plural(got, "good question")} from these pages.`, "warn", { ms: 7000 });
   } catch (e) {
+    stopProgress(false);
     show("setup");
-    handleError(e);
+    if (e instanceof ApiError) handleError(e);
+    else { console.error(e); toast("Something went wrong opening this exam. Please try again.", "error", { ms: 8000 }); }
   }
+}
+/** Honest progress while the server writes the set: staged steps and a bar that eases towards ~90% over the
+ *  expected time (it never claims to be done until the questions arrive). */
+function loadingProgress(f, origin) {
+  const expected = 6000 + f.count * 700 + (f.qtype !== "mcq" ? 6000 : 0);
+  const steps = [
+    origin === "weak" ? "Looking at what you got wrong" : "Reading your pages",
+    f.qtype === "theory" ? "Writing theory questions and marking schemes" : f.qtype === "mixed" ? "Writing objective and theory questions" : "Writing questions and plausible options",
+    "Checking every answer against your notes",
+    "Almost ready",
+  ];
+  const box = $("#load-steps"), bar = $("#load-bar");
+  const t0 = Date.now();
+  const draw = () => {
+    const t = Date.now() - t0;
+    const p = Math.min(0.92, 1 - Math.exp(-t / (expected * 0.6)));
+    bar.style.width = `${Math.round(p * 100)}%`;
+    const at = Math.min(steps.length - 1, Math.floor(p * steps.length));
+    box.replaceChildren(...steps.map((s, i) => el("div", { class: `ls ${i < at ? "done" : i === at ? "now" : ""}` }, el("span", { class: "ls-dot" }), s)));
+    if (t > 45000) $("#loading-text").textContent = "Still working: big page ranges and theory questions take longer. Hang on…";
+  };
+  draw();
+  const iv = setInterval(draw, 400);
+  return (ok) => { clearInterval(iv); if (ok) bar.style.width = "100%"; };
 }
 
 /* ---------------- attempt ---------------- */
 function startAttempt({ docId, filename, questions, settings, timing, minutes, instant, origin, topic, parentId }) {
+  questions = (questions || []).filter((qq) => qq && qq.id && (qq.type === "theory" || Array.isArray(qq.options)));
   state.attempt = {
     id: uid(), createdAt: Date.now(), docId, filename, settings, questions,
     timing, minutes, instant, origin: origin || "new", topic: topic || "", parentId: parentId || null,
@@ -468,8 +504,10 @@ function saveAttempt() {
   else lsSet(LS_CURRENT, a);
 }
 const q = (i) => state.attempt.questions[i];
-const answered = (qq, att = state.attempt) => {
-  const a = att.answers[qq.id];
+// NB: never pass `answered` straight to Array#filter (filter's index would arrive as `att`); that was the
+// "Cannot read properties of undefined (reading 'q1')" crash that stopped exams starting.
+const answered = (qq, att) => {
+  const a = (att?.answers ? att : state.attempt).answers[qq.id];
   return qq.type === "mcq" ? a?.choice != null : !!a?.text?.trim();
 };
 const maxOf = (qq) => (qq.type === "mcq" ? 1 : qq.marks);
@@ -542,12 +580,12 @@ function renderNavigator() {
     "aria-label": `Question ${i + 1}${answered(qq) ? ", answered" : ""}${a.flagged.includes(qq.id) ? ", flagged" : ""}`,
     onclick: () => goTo(i),
   }, String(i + 1))));
-  const done = a.questions.filter(answered).length;
+  const done = a.questions.filter((qq) => answered(qq, a)).length;
   nav.append(el("span", { class: "nav-count muted" }, `${done}/${a.questions.length} answered`));
 }
 function goTo(i) {
   const a = state.attempt;
-  if (a.layout === "single") { a.current = i; saveAttempt(); renderPractice(); window.scrollTo({ top: 0 }); }
+  if (a.layout === "single") { a.current = i; saveAttempt(); renderPractice(); scrollTop(); }
   else document.getElementById(`qc-${a.questions[i].id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 function refreshQuestion(i) {
@@ -565,6 +603,7 @@ function renderQuestion(i) {
     el("span", { class: "q-tags" },
       el("span", { class: "tag" }, qq.type === "mcq" ? "Objective · 1 mark" : `Theory · ${plural(qq.marks, "mark")}`),
       qq.topic ? el("span", { class: "tag soft" }, qq.topic) : null,
+      qq.skill && qq.skill !== "recall" ? el("span", { class: "tag skill" }, qq.skill === "application" ? "Apply it" : "Understand it") : null,
       el("span", { class: `tag diff ${qq.difficulty}` }, qq.difficulty)),
     el("button", { type: "button", class: `act flag-btn${flagged ? " on" : ""}`, "aria-pressed": String(flagged), title: "Flag to come back to", onclick: () => toggleFlag(i) },
       icon("flag"), el("span", {}, flagged ? "Flagged" : "Flag")));
@@ -597,6 +636,7 @@ function feedbackMcq(qq, mark) {
   return el("div", { class: `feedback ${ok ? "ok" : "bad"}` },
     el("div", { class: "fb-title" }, icon(ok ? "check" : "x"), ok ? "Correct" : mark.choice == null ? `Not answered · the answer is ${LETTERS[qq.answer]}` : `Not quite · the answer is ${LETTERS[qq.answer]}`),
     qq.explanation ? md(qq.explanation) : null,
+    !ok && qq.misconception ? el("p", { class: "fb-trap" }, el("b", {}, "Common trap: "), qq.misconception) : null,
     pageLinks(qq.pages, state.attempt.docId));
 }
 function pickOption(i, k) {
@@ -655,8 +695,10 @@ function feedbackTheory(qq, mark) {
       el("span", { class: "pt-mark" }, `${pt.awarded}/${pt.marks}`), el("span", {}, md(pt.point, true, "span", "md"), pt.comment ? el("span", { class: "muted pt-comment" }, ` · ${pt.comment}`) : null)))));
   }
   if (mark.good?.length) box.append(el("div", { class: "fb-list good" }, el("b", {}, "What you did well"), el("ul", {}, mark.good.map((g) => el("li", {}, g)))));
-  if (mark.missing?.length) box.append(el("div", { class: "fb-list miss" }, el("b", {}, "To score higher"), el("ul", {}, mark.missing.map((g) => el("li", {}, g)))));
-  const model = el("details", { class: "model" }, el("summary", {}, "Model answer"), md(mark.model_answer || qq.model_answer));
+  if (mark.missing?.length) box.append(el("div", { class: "fb-list miss" }, el("b", {}, "What was missing"), el("ul", {}, mark.missing.map((g) => el("li", {}, g)))));
+  if (mark.improve?.length) box.append(el("div", { class: "fb-list improve" }, el("b", {}, "How to improve"), el("ul", {}, mark.improve.map((g) => el("li", {}, g)))));
+  if (mark.short_answer) box.append(el("div", { class: "fb-short" }, el("b", {}, "Short model answer"), md(mark.short_answer)));
+  const model = el("details", { class: "model" }, el("summary", {}, mark.short_answer ? "Full model answer" : "Model answer"), md(mark.model_answer || qq.model_answer));
   box.append(model, pageLinks(qq.pages, state.attempt.docId));
   return box;
 }
@@ -881,9 +923,13 @@ function generateWeak(a, s) {
   }
   const count = clamp(st.count || 10, 5, 50);
   const qtype = st.qtype || "mcq";
+  const missed = a.questions.filter((qq) => { const m = a.marks[qq.id]; return !m || m.score < m.max; }).map((qq) => String(qq.question).slice(0, 280)).slice(0, 12);
+  // adapt difficulty to how it went: rebuild on easier ground after a poor score, stretch after a good one
+  const difficulty = s.pct < 45 ? "easy" : s.pct < 70 ? "medium" : s.pct >= 85 ? "hard" : (st.difficulty || "mixed");
   generate({ doc_id: a.docId, page_from: from, page_to: to, qtype, count,
     theory_count: qtype === "mixed" ? clamp(st.n_theory || 1, 1, count - 1) : null,
-    style: st.style || "general", difficulty: st.difficulty || "mixed", topic,
+    weak_topics: s.weak.slice(0, 6).map((w) => w.name), missed,
+    style: st.style || "general", difficulty, topic,
     timing: a.timing, minutes: a.timing === "timed" ? (a.minutes || 10) : 10, instant: a.instant }, { origin: "weak" });
 }
 
@@ -894,8 +940,10 @@ function saveHistory(a) {
     id: a.id, date: a.finishedAt || Date.now(), docId: a.docId, filename: a.filename, origin: a.origin,
     style: a.settings?.style, qtype: a.settings?.qtype, n: a.questions.length, score: s.score, max: s.max, pct: s.pct,
     timeMs: a.elapsedMs, weak: s.weak.slice(0, 3).map((w) => w.name),
+    topics: Object.fromEntries(Object.entries(s.topics).map(([k, t]) => [k, { score: t.score, max: t.max, n: t.n }])),
     attempt: { ...a },
   };
+  window.dcAuth?.db.saveExam(entry);   // signed in: keep it in the account too (no-op for guests)
   let hist = lsGet(LS_HISTORY, []).filter((h) => h.id !== a.id);
   hist.unshift(entry);
   hist = hist.slice(0, MAX_HISTORY);
@@ -904,8 +952,56 @@ function saveHistory(a) {
     if (full) delete full.attempt; else hist.pop();
   }
 }
+/** Signed in: merge account results into this browser's history, and upload any local results the account lacks
+ *  (e.g. exams taken as a guest before signing up). */
+async function syncHistory() {
+  if (!window.dcAuth?.user) return;
+  const remote = await window.dcAuth.db.listExams(MAX_HISTORY * 2);
+  if (!Array.isArray(remote)) return;
+  const local = lsGet(LS_HISTORY, []);
+  const have = new Set(remote.map((r) => String(r.id)));
+  for (const h of local) if (!have.has(String(h.id))) window.dcAuth.db.saveExam(h);
+  const byId = new Map(local.map((h) => [String(h.id), h]));
+  for (const r of remote) if (!byId.has(String(r.id))) byId.set(String(r.id), r);
+  let merged = [...byId.values()].sort((x, y) => (y.date || 0) - (x.date || 0)).slice(0, MAX_HISTORY);
+  while (!lsSet(LS_HISTORY, merged) && merged.length) { const full = [...merged].reverse().find((h) => h.attempt); if (full) delete full.attempt; else merged.pop(); }
+  if (state.view === "setup") renderHistory();
+}
+/** Per-topic confidence from recent exams: recency-weighted share of marks, shrunk towards 50% when there is little
+ *  evidence, so one lucky question doesn't read as mastery. */
+function topicConfidence(hist) {
+  const agg = {};
+  hist.slice(0, 15).forEach((h, i) => {
+    const topics = h.topics || (h.attempt ? summarize(h.attempt).topics : null);
+    if (!topics) return;
+    const w = Math.pow(0.85, i);
+    for (const [name, t] of Object.entries(topics)) {
+      const key = name.trim(); if (!key || !t.max) continue;
+      agg[key] ||= { name: key, s: 0, m: 0, n: 0, last: h.date };
+      agg[key].s += w * t.score; agg[key].m += w * t.max; agg[key].n += t.n || 1;
+    }
+  });
+  return Object.values(agg).map((t) => {
+    const prior = 2;  // pseudo-marks at 50%
+    const conf = Math.round(100 * (t.s + prior * 0.5) / (t.m + prior));
+    return { ...t, conf, level: conf >= 75 ? "Strong" : conf >= 55 ? "Building" : "Needs work" };
+  }).sort((a, b) => a.conf - b.conf);
+}
+function renderConfidence(hist) {
+  const card = $("#confidence"); if (!card) return;
+  const topics = topicConfidence(hist);
+  card.hidden = !topics.length;
+  if (!topics.length) return;
+  $("#confidence-body").replaceChildren(el("ul", { class: "conf-list" }, topics.slice(0, 8).map((t) => el("li", {},
+    el("span", { class: "conf-name", title: t.name }, t.name),
+    el("span", { class: "conf-meter", role: "meter", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(t.conf), "aria-label": `${t.name} confidence` },
+      el("span", { class: `conf-fill ${t.conf >= 75 ? "ok" : t.conf >= 55 ? "part" : "bad"}`, style: `width:${Math.max(4, t.conf)}%` })),
+    el("span", { class: `conf-level ${t.conf >= 75 ? "ok" : t.conf >= 55 ? "part" : "bad"}` }, `${t.conf}% · ${t.level}`)))),
+    el("p", { class: "muted small conf-note" }, `Based on ${plural(topics.reduce((n, t) => n + t.n, 0), "question")}. Use "Generate new set on weak areas" after an exam to work on the lowest ones.`));
+}
 function renderHistory() {
   const hist = lsGet(LS_HISTORY, []);
+  renderConfidence(hist);
   const body = $("#history-body");
   $("#clear-history").hidden = !hist.length;
   if (!hist.length) {
@@ -949,24 +1045,25 @@ function resume(cur) {
   startTimer();
 }
 
-/* ---------------- theme ---------------- */
-const THEMES = ["auto", "light", "dark"];
-function applyTheme(t) {
-  if (t === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
-  $("#theme-btn").replaceChildren(icon(t === "light" ? "sun" : t === "dark" ? "moon" : "auto"));
-  $("#theme-btn").title = `Theme: ${t}`;
-  localStorage.setItem("dc-theme", t);
-}
-
 /* ---------------- events ---------------- */
 function bindEvents() {
-  $("#theme-btn").addEventListener("click", () => applyTheme(THEMES[(THEMES.indexOf(localStorage.getItem("dc-theme") || "auto") + 1) % 3]));
   $("#setup-form").addEventListener("input", (e) => { if (e.target.id === "minutes") state.minutesTouched = true; syncForm(); });
   $("#setup-form").addEventListener("change", (e) => { if (e.target.id === "doc-select") renderDocSelect(e.target.value); syncForm(); });
   $("#setup-form").addEventListener("submit", (e) => { e.preventDefault(); generate(); });
-  $("#file-input").addEventListener("change", (e) => { const f = e.target.files?.[0]; if (f && !state.uploading) uploadFile(f); });
-  $("#upload-label").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#file-input").click(); } });
-  $("#clear-history").addEventListener("click", () => { if (confirm("Clear your exam history on this device?")) { localStorage.removeItem(LS_HISTORY); renderHistory(); } });
+  $("#ex-file-input").addEventListener("change", (e) => { const f = e.target.files?.[0]; if (f && !state.uploading) uploadFile(f); });
+  $("#upload-label").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#ex-file-input").click(); } });
+  $("#clear-history").addEventListener("click", async () => {
+    const signedIn = !!window.dcAuth?.user;
+    if (!confirm(signedIn ? "Clear your exam history on this device and in your account?" : "Clear your exam history on this device?")) return;
+    localStorage.removeItem(LS_HISTORY);
+    if (signedIn) await window.dcAuth.db.clearExams();
+    renderHistory();
+  });
+  $("#page-open-chat").addEventListener("click", () => {
+    const { docId, page } = state.pageOpen || {};
+    $("#dlg-page").close();
+    if (docId) document.dispatchEvent(new CustomEvent("dc:open-page", { detail: { docId, page } }));
+  });
   $("#submit-btn").addEventListener("click", confirmSubmit);
   $("#layout-btn").addEventListener("click", () => {
     const a = state.attempt;
@@ -980,7 +1077,7 @@ function bindEvents() {
     if (a.current >= a.questions.length - 1) confirmSubmit(); else goTo(a.current + 1);
   });
   document.addEventListener("keydown", (e) => {
-    if (state.view !== "practice" || state.attempt?.layout !== "single") return;
+    if (!examVisible() || state.view !== "practice" || state.attempt?.layout !== "single") return;
     if (/^(TEXTAREA|INPUT|SELECT)$/.test(e.target.tagName) || document.querySelector("dialog[open]")) return;
     const qq = q(state.attempt.current);
     if (e.key === "ArrowRight") goTo(Math.min(state.attempt.questions.length - 1, state.attempt.current + 1));
@@ -995,18 +1092,37 @@ function bindEvents() {
   $("#dlg-page").addEventListener("click", (e) => { if (e.target === $("#dlg-page")) $("#dlg-page").close(); });
 }
 
-/* ---------------- boot ---------------- */
-async function boot() {
-  applyTheme(localStorage.getItem("dc-theme") || "auto");
-  bindEvents();
-  applyPrefs();
-  await loadDocs();
-  renderDocSelect();
-  show("setup");
-  try { state.config = await api("/api/config"); }
-  catch (e) { handleError(e); }
-  try { setUsage(await api("/api/usage")); } catch { /* offline: keep going */ }
-  await syncDocs();
-  if (new URLSearchParams(location.search).get("resume") === "1") { const cur = lsGet(LS_CURRENT, null); if (cur && !cur.submitted) resume(cur); }
+/* ---------------- boot (called by app.js the first time Exam Prep is opened) ---------------- */
+let started = null;
+export function initExam() {
+  return started ||= (async () => {
+    bindEvents();
+    applyPrefs();
+    await loadDocs();
+    renderDocSelect(preferredDoc());
+    show("setup");
+    try { state.config = await api("/api/config"); }
+    catch (e) { handleError(e); }
+    try { setUsage(await api("/api/usage")); } catch { /* offline: keep going */ }
+    await syncDocs({ silent: true });
+    if (new URLSearchParams(location.search).get("resume") === "1") { const cur = lsGet(LS_CURRENT, null); if (cur && !cur.submitted) resume(cur); }
+    syncHistory();
+  })().catch((e) => { started = null; console.error(e); toast("Exam Prep failed to start. Please reload the page.", "error", { ms: 10000 }); });
 }
-boot().catch((e) => { console.error(e); toast("Exam Prep failed to start. Please reload the page.", "error", { ms: 10000 }); });
+/** Exam Prep was shown again: pick up library changes made in Chat (uploads, removals, selection). */
+export async function examShown() {
+  if (!started) return initExam();
+  await started;
+  await loadDocs();
+  if (state.view === "setup") renderDocSelect(preferredDoc());
+  try { setUsage(await api("/api/usage")); } catch { /* keep last */ }
+}
+/** The first document ticked in the chat library, so both modes start from the same notes. */
+function preferredDoc() {
+  try {
+    const sel = JSON.parse(localStorage.getItem("dc-selected") || "null");
+    const usable = state.docs.filter((d) => d.status !== "stale");
+    if (Array.isArray(sel)) { const hit = usable.find((d) => sel.includes(d.id)); if (hit && !usable.some((d) => d.id === $("#doc-select").value && sel.includes(d.id))) return hit.id; }
+  } catch { /* ignore */ }
+  return undefined;
+}

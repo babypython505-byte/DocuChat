@@ -113,8 +113,17 @@ async function saveConv(conv = state.current) {
   if (!conv || !conv.messages.length) return;
   conv.updatedAt = Date.now();
   if (!state.convs.includes(conv)) state.convs.unshift(conv);
+  if (conv === state.current) localStorage.setItem("dc-last", conv.id);
   await safeIdb(() => idb.put("convs", JSON.parse(JSON.stringify(conv))));
   renderConvs();
+  if (!state.busy) pushChat(conv);
+}
+/** Signed in: keep chats in the account too (debounced per chat; no-op for guests). */
+const pushTimers = new Map();
+function pushChat(conv) {
+  if (!window.dcAuth?.user) return;
+  clearTimeout(pushTimers.get(conv.id));
+  pushTimers.set(conv.id, setTimeout(() => { pushTimers.delete(conv.id); window.dcAuth.db.saveChat(conv); }, 800));
 }
 
 /* ---------------- API ---------------- */
@@ -348,12 +357,14 @@ async function openConv(id) {
   if (state.busy) return toast("Wait for the current answer to finish.", "warn");
   const conv = state.convs.find((c) => c.id === id);
   if (!conv) return;
+  setMode("chat");
   state.current = conv;
   renderConvs(); renderThread(); closeSidebarMobile();
   localStorage.setItem("dc-last", id);
 }
 function startNewChat() {
   if (state.busy) return;
+  setMode("chat");
   state.current = newConv();
   renderConvs(); renderThread(); closeSidebarMobile();
   $("#input").focus();
@@ -364,13 +375,16 @@ async function renameConv(c) {
   c.title = name.trim().slice(0, 120);
   c.renamed = true;
   await safeIdb(() => idb.put("convs", JSON.parse(JSON.stringify(c))));
+  pushChat(c);
   renderConvs(); if (state.current?.id === c.id) $("#conv-title").textContent = c.title;
 }
 async function deleteConv(c) {
-  const ok = await promptDialog({ title: "Delete chat?", text: `"${c.title}" will be removed from this browser.`, ok: "Delete", input: false });
+  const where = window.dcAuth?.user ? "this browser and your account" : "this browser";
+  const ok = await promptDialog({ title: "Delete chat?", text: `"${c.title}" will be removed from ${where}.`, ok: "Delete", input: false });
   if (ok == null) return;
   state.convs = state.convs.filter((x) => x.id !== c.id);
   await safeIdb(() => idb.del("convs", c.id));
+  window.dcAuth?.db.deleteChat(c.id);
   if (state.current?.id === c.id) startNewChat(); else renderConvs();
   toast("Chat deleted.", "ok");
 }
@@ -479,8 +493,10 @@ function renderThread() {
   const thread = $("#thread");
   thread.replaceChildren();
   const conv = state.current;
-  $("#conv-title").textContent = conv?.messages.length ? conv.title : "New chat";
-  document.title = conv?.messages.length ? `${conv.title} · DocuChat` : "DocuChat";
+  if (mode === "chat") {
+    $("#conv-title").textContent = conv?.messages.length ? conv.title : "New chat";
+    document.title = conv?.messages.length ? `${conv.title} · DocuChat` : "DocuChat";
+  }
   if (!conv?.messages.length) { thread.append(renderEmpty()); updateSend(); return; }
   const col = el("div", { class: "col" });
   conv.messages.forEach((m, i) => col.append(renderMessage(m, i === conv.messages.length - 1)));
@@ -493,15 +509,15 @@ function renderEmpty() {
   if (!state.docs.length && !state.uploads.length) {
     col.append(
       el("div", { class: "empty-art" }, icon("file")),
-      el("h2", {}, "Chat with your PDFs"),
-      el("p", {}, "Upload lecture notes, a textbook chapter or research papers. Every answer links to the exact page it came from."),
+      el("h2", {}, "Study smarter from your own notes"),
+      el("p", {}, "Upload lecture notes, a textbook chapter or research papers. Ask anything with answers cited to the page, or switch to Exam Prep to practise real exam questions."),
       el("label", { class: "big-drop", tabindex: "0", onclick: (e) => { e.preventDefault(); $("#file-input").click(); }, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#file-input").click(); } } },
         icon("upload"), el("b", {}, "Drop PDFs here or click to browse"),
         el("small", {}, `Up to ${state.config?.docs_limit ?? 3} PDFs · ${state.config?.max_upload_mb ?? 20} MB each · text-based PDFs`)),
       el("div", { class: "feature-row" },
         el("div", {}, el("b", {}, "Cited answers"), "Click any [1] to open the page."),
-        el("div", {}, el("b", {}, "Study tools"), "Summaries, flashcards, quizzes."),
-        el("div", {}, el("b", {}, "Research tools"), "Briefs, comparisons, citations.")));
+        el("button", { class: "feature-link", type: "button", onclick: () => setMode("exam", { history: "push" }) }, el("b", {}, "Exam Prep →"), "University, WAEC, JAMB. AI-marked."),
+        el("div", {}, el("b", {}, "Study tools"), "Summaries, flashcards, quizzes.")));
     return col;
   }
   const scoped = scopeDocs();
@@ -520,9 +536,10 @@ function renderEmpty() {
       scoped.length >= 2
         ? { icon: "columns", label: "Compare these documents", sub: "Side-by-side table", tool: "compare" }
         : { icon: "flask", label: "Extract the methodology", sub: "Research brief", tool: "brief" },
+      { icon: "grad", label: "Practise exam questions", sub: "Exam Prep · MCQ & theory, AI-marked", exam: true },
     ];
     col.append(el("div", { class: "suggest-title" }, "Try"),
-      el("div", { class: "suggests" }, sug.map((s) => el("button", { class: "suggest", onclick: () => (s.tool ? runTool(s.tool) : sendChat(s.ask)) },
+      el("div", { class: "suggests" }, sug.map((s) => el("button", { class: s.exam ? "suggest wide" : "suggest", onclick: () => (s.exam ? setMode("exam", { history: "push" }) : s.tool ? runTool(s.tool) : sendChat(s.ask)) },
         icon(s.icon), el("div", {}, s.label, el("small", {}, s.sub))))));
   }
   return col;
@@ -1078,6 +1095,76 @@ function applyTheme(t) {
   localStorage.setItem("dc-theme", t);
 }
 
+/* ---------------- modes: Chat | Exam Prep (one layout, one library) ---------------- */
+let mode = "chat";
+let examMod = null;
+function setMode(next, { history: hist = "replace" } = {}) {
+  next = next === "exam" ? "exam" : "chat";
+  const changed = next !== mode;
+  mode = next;
+  $("#shell").dataset.mode = mode;
+  $("#chat-pane").hidden = mode !== "chat";
+  $("#exam-pane").hidden = mode !== "exam";
+  for (const t of $$(".ms-tab")) { const on = t.dataset.mode === mode; t.setAttribute("aria-selected", String(on)); t.tabIndex = on ? 0 : -1; }
+  for (const t of $$(".mode, .tb-item[data-mode]")) {
+    if (t.dataset.mode === mode) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
+  }
+  if (mode === "exam") {
+    $("#conv-title").textContent = "Exam Prep";
+    document.title = "Exam Prep · DocuChat";
+    toggleScopePop(false);
+    if (!$("#viewer").hidden) closeViewer();
+    (examMod ? Promise.resolve(examMod) : import("./exam.js").then((m) => (examMod = m)))
+      .then((m) => m.examShown())
+      .catch((e) => { console.error(e); toast("Exam Prep couldn't load. Check your connection and reload.", "error", { ms: 9000 }); });
+  } else if (changed) {
+    renderThread();
+  }
+  if (changed || hist !== "none") {
+    const url = new URL(location.href);
+    if (mode === "exam") url.searchParams.set("mode", "exam"); else url.searchParams.delete("mode");
+    url.searchParams.delete("resume");
+    const target = url.pathname + url.search + url.hash;
+    if (target !== location.pathname + location.search + location.hash) {
+      if (hist === "push") history.pushState({ mode }, "", target); else history.replaceState({ mode }, "", target);
+    }
+  }
+}
+async function reloadDocsFromStorage() {
+  const docs = await safeIdb(() => idb.all("docs"), []);
+  const byId = new Map(state.docs.map((d) => [d.id, d]));
+  for (const { blob, index, ...meta } of docs || []) {
+    if (!byId.has(meta.id)) state.docs.push({ ...meta, status: index ? "ready" : "stale", hasBlob: !!blob });
+  }
+  state.selected = new Set(JSON.parse(localStorage.getItem("dc-selected") || "[]"));
+  renderDocs();
+}
+/** Signed in: bring account chats into this browser (newest wins) and upload chats only this browser has. */
+async function syncChats() {
+  if (!window.dcAuth?.user) return;
+  const remote = await window.dcAuth.db.listChats();
+  if (!Array.isArray(remote)) return;
+  const local = new Map(state.convs.map((c) => [c.id, c]));
+  const remoteIds = new Set(remote.map((r) => r.id));
+  let changed = false;
+  for (const r of remote) {
+    const l = local.get(r.id);
+    if (!l || (r.updatedAt || 0) > (l.updatedAt || 0) + 1000) {
+      const conv = { ...(l || {}), ...r };
+      delete conv.synced;
+      await safeIdb(() => idb.put("convs", conv));
+      if (l) Object.assign(l, conv); else state.convs.push(conv);
+      changed = true;
+    }
+  }
+  for (const c of state.convs) if (!remoteIds.has(c.id) && c.messages?.length) window.dcAuth.db.saveChat(c);
+  if (changed) {
+    state.convs.sort((a, b) => b.updatedAt - a.updatedAt);
+    renderConvs();
+    if (state.current && !state.current.messages.length && mode === "chat") renderThread();
+  }
+}
+
 /* ---------------- layout helpers ---------------- */
 const mobile = () => window.matchMedia("(max-width: 860px)").matches;
 function toggleSidebar() {
@@ -1091,6 +1178,27 @@ function autosize() { const t = $("#input"); t.style.height = "auto"; t.style.he
 /* ---------------- events ---------------- */
 function bindEvents() {
   $("#new-chat").addEventListener("click", startNewChat);
+  // mode switches: header tabs (with arrow keys), sidebar links (real hrefs work without JS), mobile tab bar
+  for (const t of $$(".ms-tab, .tb-item[data-mode]")) t.addEventListener("click", () => { setMode(t.dataset.mode, { history: "push" }); closeSidebarMobile(); });
+  for (const a of $$(".mode")) a.addEventListener("click", (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+    e.preventDefault(); setMode(a.dataset.mode, { history: "push" }); closeSidebarMobile();
+  });
+  $(".mode-switch").addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const next = e.key === "ArrowLeft" || e.key === "Home" ? "chat" : "exam";
+    setMode(next, { history: "push" }); $(`#tab-${next}`).focus();
+  });
+  $("#tb-library").addEventListener("click", toggleSidebar);
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a[data-goto]");
+    if (!a || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    e.preventDefault(); setMode(a.dataset.goto, { history: "push" });
+  });
+  window.addEventListener("popstate", () => setMode(new URLSearchParams(location.search).get("mode"), { history: "none" }));
+  document.addEventListener("dc:library-changed", reloadDocsFromStorage);
+  document.addEventListener("dc:open-page", (e) => { setMode("chat", { history: "push" }); openDocViewer(e.detail.docId, e.detail.page || 1); });
   $("#chat-search").addEventListener("input", debounce((e) => { state.search = e.target.value; renderConvs(); }, 120));
   $("#upload-btn").addEventListener("click", () => $("#file-input").click());
   $("#mini-drop").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#file-input").click(); } });
@@ -1186,7 +1294,7 @@ function bindEvents() {
       else if (!$("#viewer").hidden) closeViewer();
       else if (typing) e.target.blur();
     }
-    else if (!typing && !mod && e.key === "/") { e.preventDefault(); input.focus(); }
+    else if (!typing && !mod && e.key === "/" && mode === "chat") { e.preventDefault(); input.focus(); }
     else if (!typing && !mod && e.key === "?") { e.preventDefault(); $("#dlg-keys").showModal(); }
   });
   for (const k of $$(".kbd-hint")) k.textContent = k.textContent.replace("Ctrl", isMac ? "⌘" : "Ctrl");
@@ -1206,6 +1314,7 @@ async function boot() {
   const last = state.convs.find((c) => c.id === localStorage.getItem("dc-last"));
   state.current = last && Date.now() - last.updatedAt < 6 * 3600e3 ? last : newConv();
   renderConvs(); renderDocs(); renderThread();
+  setMode(new URLSearchParams(location.search).get("mode"), { history: "none" });
   try {
     state.config = await apiJson("/api/config");
     if (state.config.provider === "FakeProvider") toast("Offline demo mode: answers are extracts, not AI-written.", "info", { ms: 6000 });
@@ -1213,7 +1322,7 @@ async function boot() {
   await refreshUsage();
   renderDocs();
   await syncDocs();
-  renderThread();
-  $("#input").focus({ preventScroll: true });
+  if (mode === "chat") { renderThread(); if (!mobile()) $("#input").focus({ preventScroll: true }); }
+  if (window.dcAuth?.ready) window.dcAuth.ready.then(syncChats);
 }
 boot().catch((e) => { console.error(e); toast("DocuChat failed to start. Please reload the page.", "error", { ms: 10000 }); });

@@ -22,7 +22,7 @@ STYLES = ("university", "waec", "jamb", "general")
 STYLE_NAMES = {"university": "University", "waec": "WAEC (SSCE)", "jamb": "JAMB / UTME", "general": "General"}
 
 MIN_QUESTIONS, MAX_QUESTIONS = 5, 50
-MCQ_BATCH, THEORY_BATCH = 15, 5          # questions per model call; keeps each reply well under the output limit
+MCQ_BATCH, THEORY_BATCH = 10, 4          # questions per model call; keeps each reply well under the output limit
 CONTEXT_CHARS = 60000                    # page text sent per call (~15k tokens): fits the free tier comfortably
 MAX_MARK_ITEMS = 10                      # theory answers marked in one request
 MAX_ANSWER_CHARS = 6000
@@ -197,29 +197,31 @@ def resolve_request(opts: dict, doc_pages: int) -> dict:
         n_theory = max(1, min(count - 1, n_theory))
         n_mcq = count - n_theory
     return {"qtype": qtype, "style": style, "difficulty": difficulty, "count": count, "page_from": lo, "page_to": hi,
-            "n_mcq": n_mcq, "n_theory": n_theory, "topic": _s(opts.get("topic"), 300)}
+            "n_mcq": n_mcq, "n_theory": n_theory, "topic": _s(opts.get("topic"), 300),
+            "weak_topics": _str_list(opts.get("weak_topics"), 6, 80), "missed": _str_list(opts.get("missed"), 12, 300)}
 
 
 # ---------- prompts ----------
 
 STYLE_GUIDE = {
     "university": {
-        "mcq": "University course exam: 4 options (A-D), one best answer. Test understanding and application, "
-               "not just recall. Plausible distractors built from common misconceptions.",
+        "mcq": "University course exam: 4 options (A-D), one best answer. Mostly understanding and application "
+               "(scenarios, data, 'which best explains', 'what would happen if'), little pure recall.",
         "theory": "University exam theory: mix short-answer questions (5-10 marks) with essay questions (15-20 marks). "
                   "Use command words such as Explain, Discuss, Compare, Critically evaluate, Apply. An essay question "
                   "may have no parts; a short-answer question may have parts (a), (b).",
     },
     "waec": {
-        "mcq": "WAEC SSCE objective paper: 4 options (A-D), or 5 options (A-E) only if that suits the subject. "
-               "One correct answer. Clear, syllabus-style stems a secondary-school student would meet.",
+        "mcq": "WAEC SSCE objective paper in the style of real past questions: 4 options (A-D). One correct answer. "
+               "Syllabus-style stems a secondary-school student would meet, including 'Which of the following...', "
+               "short scenarios, and simple calculations or diagrams described in words where the notes allow.",
         "theory": "WAEC SSCE theory paper: structured questions with numbered parts (a), (b), (c) and where useful "
                   "sub-parts (i), (ii), each part with its marks, total 10-15 marks per question. Use WAEC command "
                   "words: State, Define, List two, Explain, Describe, Calculate, Give two reasons.",
     },
     "jamb": {
-        "mcq": "JAMB UTME objective style: 4 options (A-D), single best answer, short direct stems, quick to read, "
-               "testing recall and simple application. Distractors close enough that guessing is hard.",
+        "mcq": "JAMB UTME objective style, like real past questions: 4 options (A-D), single best answer, short direct "
+               "stems, quick to read, testing key facts and their application. Distractors close enough that guessing is hard.",
         "theory": "JAMB itself is all objective, so make short-answer questions (2-6 marks) that check the same "
                   "facts in the student's own words, with parts (a), (b) where useful.",
     },
@@ -239,7 +241,10 @@ DIFF_GUIDE = {
 
 MCQ_SHAPE = {"questions": [{
     "type": "mcq", "question": "<question stem>", "options": ["<A>", "<B>", "<C>", "<D>"], "answer": 0,
-    "explanation": "<why the answer is right and the common wrong choice is wrong>", "pages": [3],
+    "explanation": "<2-4 sentences that TEACH: why the answer is right (the idea behind it, citing the page as 'p. 3'), "
+                   "then why the most tempting wrong option is wrong>",
+    "misconception": "<the common misunderstanding the most tempting distractor is built on, one sentence>",
+    "skill": "recall|understanding|application", "pages": [3],
     "topic": "<short topic name, 1-4 words>", "difficulty": "easy|medium|hard"}]}
 
 THEORY_SHAPE = {"questions": [{
@@ -254,7 +259,12 @@ def generation_system(kind: str, req: dict) -> str:
     guide = STYLE_GUIDE[req["style"]][kind]
     shape = MCQ_SHAPE if kind == "mcq" else THEORY_SHAPE
     extra = ("'answer' is the 0-based index of the correct option. Exactly one option is correct; no 'all of the "
-             "above' or 'none of the above'. Options are short and similar in length." if kind == "mcq" else
+             "above' or 'none of the above'. Options are short, similar in length and grammatically parallel.\n"
+             "- Test UNDERSTANDING, not just recall: at least 60% of questions must be 'understanding' or 'application' "
+             "(why/how, cause and effect, apply the idea to a new example or scenario, interpret a statement). Use "
+             "'recall' only for key definitions.\n"
+             "- Every distractor must be plausible: build each one from a real misconception, a confusable term from "
+             "the notes, or a half-right idea. Never use joke or obviously wrong options." if kind == "mcq" else
              "Marking points must add up to the question's total marks, and so must the parts' marks. Each marking "
              "point is something specific a marker can tick. The model answer covers every marking point.")
     return f"""{GEN_MARKER}
@@ -263,6 +273,7 @@ Style: {STYLE_NAMES[req['style']]}. {guide}
 Difficulty: {DIFF_GUIDE[req['difficulty']]}.
 Rules (mandatory):
 - Every question must be answerable from the PAGES below only. Do not test facts that are not in them.
+- Never copy a sentence from the notes as the stem; rephrase so the student must understand, not pattern-match.
 - 'pages' lists the page number(s) from the === Page N === markers where the answer is found.
 - Spread questions across the pages; no two questions test the same fact.
 - {extra}
@@ -277,6 +288,12 @@ Return JSON exactly in this shape:
 def generation_user(kind: str, n: int, req: dict, pages: dict[int, str], avoid: list[str]) -> str:
     focus = f"\nFocus topic: {req['topic']} (prefer questions on this; use other material only if needed)." if req["topic"] else ""
     avoid_block = ("\nAlready asked (do not repeat these):\n" + "\n".join(f"- {a[:160]}" for a in avoid[-30:])) if avoid else ""
+    if req.get("weak_topics") or req.get("missed"):
+        missed = "\n".join(f"- {m[:200]}" for m in req.get("missed", [])[:12])
+        focus += ("\nADAPTIVE PRACTICE: the student is weak on: " + (", ".join(req.get("weak_topics", [])) or "the concepts below") +
+                  ". Write NEW questions on these exact concepts from different angles (do not reuse the stems below). "
+                  "Start with one or two easier questions to rebuild confidence, then build up to application. "
+                  "Target the misconceptions their wrong answers suggest." + (f"\nQuestions they got wrong:\n{missed}" if missed else ""))
     meta = json.dumps({"kind": kind, "count": n, "pages": sorted(pages)})
     label = "multiple-choice (objective)" if kind == "mcq" else "theory (written-answer)"
     return (f"EXAM_REQUEST: {meta}\nWrite exactly {n} {label} questions.{focus}{avoid_block}\n\n"
@@ -340,8 +357,10 @@ def normalize_mcq(q: dict, lo: int, hi: int, pages: dict[int, str]) -> dict | No
     if not refs:
         guess = best_page(f"{question} {correct} {explanation}", pages)
         refs = [guess] if guess else []
+    skill = q.get("skill") if q.get("skill") in ("recall", "understanding", "application") else "understanding"
     return {"type": "mcq", "question": question, "options": options, "answer": options.index(correct),
-            "explanation": explanation, "pages": refs, "topic": _s(q.get("topic"), 60) or "General",
+            "explanation": explanation, "misconception": _s(q.get("misconception"), 400), "skill": skill,
+            "pages": refs, "topic": _s(q.get("topic"), 60) or "General",
             "difficulty": q.get("difficulty") if q.get("difficulty") in ("easy", "medium", "hard") else "medium"}
 
 
@@ -445,7 +464,7 @@ def generate_exam(provider, store: VectorStore, doc_id: str, opts: dict) -> dict
                            lambda d: normalize_questions(d, kind, lo, hi, chosen), max_tokens)
         return kind, n, qs
 
-    with ThreadPoolExecutor(max_workers=min(3, len(jobs))) as pool:
+    with ThreadPoolExecutor(max_workers=min(4, len(jobs))) as pool:
         results = list(pool.map(run, jobs))
 
     by_kind: dict[str, list[dict]] = {"mcq": [], "theory": []}
@@ -494,6 +513,8 @@ def mark_mcq(question: dict, choice) -> dict:
 MARK_SHAPE = {"results": [{
     "id": "q1", "awarded": [{"point": 0, "marks": 2, "comment": "<why this mark>"}],
     "good": ["<what the answer did well>"], "missing": ["<a marking point the answer missed or got wrong>"],
+    "short_answer": "<a SHORT model answer for this question, 2-4 sentences or bullet points, that would earn full marks>",
+    "improve": ["<one concrete step to gain the missing marks next time, e.g. 'State the definition first, then give an example'>"],
     "feedback": "<one or two sentences of encouraging, specific advice>"}]}
 
 
@@ -505,7 +526,8 @@ Award marks for a point when the answer clearly makes it, in any wording; partia
 that is only partly made. Do not award marks for points the answer does not make, however long it is. Ignore
 spelling and grammar unless they change the meaning. Never give more than a point's marks.
 'good' lists what the student did well (empty list if nothing). 'missing' lists what they missed or got wrong,
-phrased so they can learn it. Keep feedback kind and specific.
+phrased so they can learn it. 'short_answer' is a brief full-mark answer in plain words; 'improve' gives 1-3
+concrete, actionable steps (exam technique or content) to score higher. Keep feedback kind and specific.
 Output strict JSON only, no commentary, no code fences.
 
 Return JSON exactly in this shape:
@@ -570,7 +592,9 @@ def normalize_marks(data, items: list[dict]) -> dict[str, dict]:
                       "points": [{"point": p["point"], "marks": p["marks"], "awarded": awarded[k], "comment": comments[k]}
                                  for k, p in enumerate(pts)],
                       "good": _str_list(r.get("good"), 6), "missing": _str_list(r.get("missing"), 8),
-                      "feedback": _s(r.get("feedback"), 800), "model_answer": q["model_answer"], "pages": q.get("pages") or []}
+                      "feedback": _s(r.get("feedback"), 800), "short_answer": _s(r.get("short_answer"), 1200),
+                      "improve": _str_list(r.get("improve"), 4, 300),
+                      "model_answer": q["model_answer"], "pages": q.get("pages") or []}
     if not by_id:
         raise ValueError("no marks")
     return by_id
@@ -615,6 +639,8 @@ def fake_reply(system: str, user: str) -> str:
                        for i, p, m in pts]
             results.append({"id": rid, "awarded": awarded, "good": ["(offline demo) Covers some key points."],
                             "missing": [p for (i, p, m), a in zip(pts, awarded) if not a["marks"]],
+                            "short_answer": "(offline demo) " + (pts[0][1] if pts else "See the model answer."),
+                            "improve": ["(offline demo) Cover every marking point in order."],
                             "feedback": "(offline demo) Compare your answer with the model answer."})
         return json.dumps({"results": results})
     meta = json.loads(re.search(r"EXAM_REQUEST: (\{.*?\})\n", user).group(1))
@@ -628,7 +654,8 @@ def fake_reply(system: str, user: str) -> str:
         if meta["kind"] == "mcq":
             qs.append({"type": "mcq", "question": f"(offline demo {tag}) Which statement appears on page {p}?",
                        "options": [s[:160], f"The opposite of: {s[:60]} ({tag}a)", f"Not mentioned ({tag}b)", f"None of these ({tag}c)"],
-                       "answer": 0, "explanation": f"Page {p} says: {s[:200]}", "pages": [p],
+                       "answer": 0, "explanation": f"Page {p} says: {s[:200]}", "pages": [p], "skill": "recall",
+                       "misconception": "(offline demo) Confusing what the notes say with its opposite.",
                        "topic": f"Page {p}", "difficulty": "easy"})
         else:
             qs.append({"type": "theory", "question": f"(offline demo {tag}) Explain what page {p} says.", "format": "structured",
