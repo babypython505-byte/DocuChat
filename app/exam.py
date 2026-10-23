@@ -242,7 +242,8 @@ DIFF_GUIDE = {
 MCQ_SHAPE = {"questions": [{
     "type": "mcq", "question": "<question stem>", "options": ["<A>", "<B>", "<C>", "<D>"], "answer": 0,
     "explanation": "<2-4 sentences that TEACH: why the answer is right (the idea behind it, citing the page as 'p. 3'), "
-                   "then why the most tempting wrong option is wrong>",
+                   "then why the most tempting wrong option is wrong. Never refer to options by letter or position "
+                   "(options are shuffled); name them by their content>",
     "misconception": "<the common misunderstanding the most tempting distractor is built on, one sentence>",
     "skill": "recall|understanding|application", "pages": [3],
     "topic": "<short topic name, 1-4 words>", "difficulty": "easy|medium|hard"}]}
@@ -333,6 +334,22 @@ def _answer_index(q: dict, options: list[str]) -> int:
 
 
 _LETTER_PREFIX = re.compile(r"^\s*\(?[A-Ea-e][).:]\s+")
+_ORDINALS = {"first": 0, "second": 1, "third": 2, "fourth": 3, "fifth": 4}
+_POS_REF = re.compile(
+    r"\b(?:the\s+)?(first|second|third|fourth|fifth)\s+(?:option|choice|answer)\b"
+    r"|\b(?:option|choice|answer)\s+\(?((?-i:[A-E]))\)?(?![\w'])",
+    re.IGNORECASE)
+
+
+def fix_position_refs(text: str, options: list[str]) -> str:
+    """Options are shuffled after generation, so 'the first option' / 'option B' in the model's explanation would
+    point at the wrong choice. Replace each positional reference with the option's own text (by original order)."""
+    def sub(m: re.Match) -> str:
+        idx = _ORDINALS[m.group(1).lower()] if m.group(1) else ord(m.group(2).upper()) - 65
+        if 0 <= idx < len(options):
+            return f'"{options[idx]}"'
+        return m.group(0)
+    return _POS_REF.sub(sub, text or "")
 
 
 def normalize_mcq(q: dict, lo: int, hi: int, pages: dict[int, str]) -> dict | None:
@@ -350,9 +367,10 @@ def normalize_mcq(q: dict, lo: int, hi: int, pages: dict[int, str]) -> dict | No
         options = [o for o in options if o != correct][:4] + [correct]
         answer = len(options) - 1
     correct = options[answer]
+    original = list(options)
     rng = random.Random(hashlib.md5(question.encode()).hexdigest())  # models favour "A"; unbias deterministically
     rng.shuffle(options)
-    explanation = _s(q.get("explanation"), 1500)
+    explanation = fix_position_refs(_s(q.get("explanation"), 1500), original)
     refs = parse_pages(q.get("pages", q.get("page")), lo, hi)
     if not refs:
         guess = best_page(f"{question} {correct} {explanation}", pages)
